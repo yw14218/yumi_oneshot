@@ -12,6 +12,7 @@ import std_msgs.msg
 from yumi_hw.srv import *
 
 
+
 LEFT = 2        #:ID of the left arm
 RIGHT = 1       #:ID of the right arm
 BOTH = 3        #:ID of both_arms
@@ -25,7 +26,13 @@ global group_r  #:The move group for the right arm
 global group_both #:The move group for using both arms at once
 # global robot    #:The RobotCommander() from MoveIt!
 global scene    #:The PlanningSceneInterface from MoveIt!
+global display_trajectory_publisher
 
+# ============ Left Reference frame: world ============ 
+# ============ Right Reference frame: world ============ 
+# Current pose reference frame for group_l: yumi_body
+# ============ Left End effector: gripper_l_base ============ 
+# ============ Right End effector: gripper_r_base ============ 
 
 
 
@@ -392,9 +399,13 @@ def plan_path(points, arm, planning_tries = 500):
     waypoints = []
     #waypoints.append(cur_arm.get_current_pose().pose)
     for point in points:
-        wpose = create_pose_euler(point[0], point[1], point[2], point[3], point[4], point[5])
+        if len(point) == 6:
+            wpose = create_pose_euler(point[0], point[1], point[2], point[3], point[4], point[5])
+        else:
+            wpose = point
         waypoints.append(copy.deepcopy(wpose))
-    #print waypoints
+
+    rospy.loginfo(waypoints)
 
     cur_arm.set_start_state_to_current_state()
 
@@ -404,6 +415,7 @@ def plan_path(points, arm, planning_tries = 500):
     while fraction < 1.0 and attempts < planning_tries:
         (plan, fraction) = cur_arm.compute_cartesian_path(waypoints, 0.01, 0.0, True)
         attempts += 1
+        print(attempts)
         rospy.loginfo('attempts: ' + str(attempts) + ', fraction: ' + str(fraction))
         if (fraction == 1.0):
             plan = cur_arm.retime_trajectory(robot.get_current_state(), plan, 1.0)
