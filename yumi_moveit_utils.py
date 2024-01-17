@@ -10,15 +10,15 @@ import moveit_msgs.msg
 import geometry_msgs.msg
 import std_msgs.msg
 from yumi_hw.srv import *
-
-
+import tf2_ros
+from geometry_msgs.msg import Pose, Quaternion, TransformStamped, Vector3
 
 LEFT = 2        #:ID of the left arm
 RIGHT = 1       #:ID of the right arm
 BOTH = 3        #:ID of both_arms
 PI = 3.1415926  #:Value of PI
 
-table_height = 0.065 #:The height of the upper surface of the table
+table_height = 0.075 #:The height of the upper surface of the table
 table_distance_x = 0.74
 
 global group_l  #:The move group for the left arm
@@ -30,7 +30,7 @@ global display_trajectory_publisher
 
 # ============ Left Reference frame: world ============ 
 # ============ Right Reference frame: world ============ 
-# Current pose reference frame for group_l: yumi_body
+# Current pose reference frame for group_l: world
 # ============ Left End effector: gripper_l_base ============ 
 # ============ Right End effector: gripper_r_base ============ 
 
@@ -82,24 +82,27 @@ def init_Moveit():
     
     group_l = moveit_commander.MoveGroupCommander("left_arm")
     group_l.set_planner_id("ESTkConfigDefault")
-    group_l.set_pose_reference_frame("yumi_body")
+    group_l.set_pose_reference_frame("world")
     group_l.allow_replanning(False)
     group_l.set_goal_position_tolerance(0.005)
     group_l.set_goal_orientation_tolerance(0.005)
+    group_l.set_max_velocity_scaling_factor(0.2)
 
     group_r = moveit_commander.MoveGroupCommander("right_arm")
     group_r.set_planner_id("ESTkConfigDefault")
-    group_r.set_pose_reference_frame("yumi_body")
+    group_r.set_pose_reference_frame("world")
     group_r.allow_replanning(False)
     group_r.set_goal_position_tolerance(0.005)
     group_r.set_goal_orientation_tolerance(0.005)
+    group_r.set_max_velocity_scaling_factor(0.2)
 
     group_both = moveit_commander.MoveGroupCommander("both_arms")
     group_both.set_planner_id("ESTkConfigDefault")
-    group_both.set_pose_reference_frame("yumi_body")
+    group_both.set_pose_reference_frame("world")
     group_both.allow_replanning(False)
     group_both.set_goal_position_tolerance(0.005)
     group_both.set_goal_orientation_tolerance(0.005)
+    group_both.set_max_velocity_scaling_factor(0.2)
 
     display_trajectory_publisher = rospy.Publisher('/move_group/display_planned_path', 	moveit_msgs.msg.DisplayTrajectory, queue_size=20)
     rospy.sleep(3)
@@ -552,3 +555,45 @@ def reset_pose():
     print("Resetting YuMi arms to an initial joint position with grippers closed")
 
     reset_arm(BOTH)
+
+# Resets both arms to calib
+def reset_calib():
+    """Resets an arm
+
+    Resets a single arm to its reset position
+
+    :param arm: The selected arm (LEFT or RIGHT)
+    :type arm: int
+    :returns: Nothing
+    :rtype: None
+    """
+    safeJointPositionR = [4.137169526075013e-05, -2.268953800201416, -2.356186628341675, 0.5236199498176575, -6.807099998695776e-05, 0.6980842351913452, -4.788856676896103e-05]
+    safeJointPositionL = [8.723969949642196e-05, -2.268956184387207, 2.35611629486084, 0.5236671566963196, 4.085124237462878e-05, 0.6981115341186523, 2.6177165636909194e-05]
+
+    global group_l
+    global group_r
+    global group_both
+
+
+    group_both.set_joint_value_target(safeJointPositionL + safeJointPositionR)
+    group_both.go(wait=True)
+    gripper_effort(LEFT, -15.0)
+    gripper_effort(RIGHT, -15.0)
+
+    rospy.sleep(1)
+
+def static_tf_broadcast(parent_id, child_id, pose_in_list) -> None:
+    br = tf2_ros.StaticTransformBroadcaster()
+    static_transformStamped = TransformStamped()
+    static_transformStamped.header.stamp = rospy.Time.now()
+    static_transformStamped.header.frame_id = parent_id
+    static_transformStamped.child_frame_id = child_id
+    static_transformStamped.transform.translation.x = pose_in_list[0]
+    static_transformStamped.transform.translation.y = pose_in_list[1]
+    static_transformStamped.transform.translation.z = pose_in_list[2]
+    static_transformStamped.transform.rotation.x = pose_in_list[3]
+    static_transformStamped.transform.rotation.y = pose_in_list[4]
+    static_transformStamped.transform.rotation.z = pose_in_list[5]
+    static_transformStamped.transform.rotation.w = pose_in_list[6]
+    br.sendTransform(static_transformStamped)
+    print("tf of target link successfully sent")

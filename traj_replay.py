@@ -10,29 +10,15 @@ import moveit_msgs.msg
 import geometry_msgs.msg
 from std_srvs.srv import Empty
 import json
-import warnings
+import tf
 import matplotlib.pyplot as plt
 import copy
+from get_fk import GetFK
+from sensor_msgs.msg import JointState
+from preprocessing import filter_joint_states, apply_transformation
+import numpy as np
 
-def smooth_trajectory(data, threshold):
-    """
-    Smooth the trajectory of a robot arm by keeping data points where at least one joint changes 
-    by a value equal to or greater than the specified threshold from its previous state.
-
-    :param data: List of lists containing the joint states of the robot arm.
-    :param threshold: The minimum change in any joint state required to keep the data point.
-    :return: List of lists containing the smoothed trajectory data.
-    """
-    smoothed_data = [data[0]]  # Initialize with the first data point
-
-    for i in range(1, len(data)):
-        # Check if any joint has changed at least the threshold
-        if any(abs(data[i][j] - smoothed_data[-1][j]) >= threshold for j in range(len(data[i]))):
-            smoothed_data.append(data[i])
-
-    return smoothed_data
-
-def cartesian():
+def cartesian(): # works!
 
     print("cur pose:")
     cur_pose = yumi.get_current_pose(yumi.LEFT)
@@ -52,34 +38,107 @@ def cartesian():
     eef_link = yumi.group_r.get_end_effector_link()
     print("============ Right End effector: {0}".format(eef_link))
 
-    # pose = copy.deepcopy(cur_pose.pose)
-    # x,y,z,q1,q2,q3,q4 =  pose.position.x, pose.position.y, pose.position.z, pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w
-    # waypoints = [x+0.1,y,z,q1,q2,q3,q4]
+    # waypoints = []
 
-    # this code makes the robot move??? TODO: fix
-    waypoints = []
+    # # start with the current pose
+    # print(yumi.group_l.get_current_pose())
+    # waypoints.append(yumi.group_l.get_current_pose().pose)
 
-    # start with the current pose
-    print(yumi.group_l.get_current_pose())
-    waypoints.append(yumi.group_l.get_current_pose().pose)
+    # # first orient gripper and move forward (+x)
+    # wpose = geometry_msgs.msg.Pose()
+    # wpose.position.x = waypoints[0].position.x + 0.1
+    # wpose.position.y = waypoints[0].position.y  
+    # wpose.position.z = waypoints[0].position.z
+    # wpose.orientation.x = waypoints[0].orientation.x
+    # wpose.orientation.y = waypoints[0].orientation.y
+    # wpose.orientation.z = waypoints[0].orientation.z
+    # wpose.orientation.w = waypoints[0].orientation.w
+    # waypoints.append(copy.deepcopy(wpose))
 
-    # first orient gripper and move forward (+x)
-    wpose = geometry_msgs.msg.Pose()
-    wpose.position.x = waypoints[0].position.x  # x is up in the gripper_l_base frame
-    wpose.position.y = waypoints[0].position.y  
-    wpose.position.z = waypoints[0].position.z 
-    wpose.orientation.x = waypoints[0].orientation.x
-    wpose.orientation.y = waypoints[0].orientation.y
-    wpose.orientation.z = waypoints[0].orientation.z
-    wpose.orientation.w = waypoints[0].orientation.w
-    waypoints.append(copy.deepcopy(wpose))
+    # wpose = geometry_msgs.msg.Pose()
+    # wpose.position.x = waypoints[0].position.x
+    # wpose.position.y = waypoints[0].position.y + 0.1
+    # wpose.position.z = waypoints[0].position.z
+    # wpose.orientation.x = waypoints[0].orientation.x
+    # wpose.orientation.y = waypoints[0].orientation.y
+    # wpose.orientation.z = waypoints[0].orientation.z
+    # wpose.orientation.w = waypoints[0].orientation.w
+    # waypoints.append(copy.deepcopy(wpose))
 
-    # print(waypoints)
+    # wpose = geometry_msgs.msg.Pose()
+    # wpose.position.x = waypoints[0].position.x
+    # wpose.position.y = waypoints[0].position.y 
+    # wpose.position.z = waypoints[0].position.z + 0.1
+    # wpose.orientation.x = waypoints[0].orientation.x
+    # wpose.orientation.y = waypoints[0].orientation.y
+    # wpose.orientation.z = waypoints[0].orientation.z
+    # wpose.orientation.w = waypoints[0].orientation.w
+    # waypoints.append(copy.deepcopy(wpose))
+
+    # del waypoints[0]
+    # # print(waypoints)
+    # (plan, fraction) = yumi.group_l.compute_cartesian_path(
+    #                             waypoints,   # waypoints to follow
+    #                             0.01,        # eef_step
+    #                             0.0)         # jump_threshold
+    # # print(plan)
+    # # Initialize the display_trajectory_publisher
+    # display_trajectory_publisher = rospy.Publisher('/move_group/display_planned_path',
+    #                                            moveit_msgs.msg.DisplayTrajectory,
+    #                                            queue_size=20)
+    # display_trajectory = moveit_msgs.msg.DisplayTrajectory()
+    # display_trajectory.trajectory_start = yumi.robot.get_current_state()
+    # display_trajectory.trajectory.append(plan)
+    # # Publish
+    # display_trajectory_publisher.publish(display_trajectory)
+
+    # yumi.group_l.execute(plan, wait=True)
+    # rospy.sleep(3)
+    # print("============ Waiting ...")
+
+def run():
+
+    with open("yumi_joint_states.json") as f:
+        joint_states = json.load(f)
+    filtered_joint_states = filter_joint_states(joint_states, 0.1)
+
+    msgs = [dict_to_joint_state(filtered_joint_state) for filtered_joint_state in filtered_joint_states]
+    rospy.loginfo(type(msgs[0]))
+    print(len(msgs))
+    gfk = GetFK('gripper_l_base', 'world')
+    eef_poses = [gfk.get_fk(msg) for msg in msgs]
+    assert len(eef_poses) == len(msgs), "error in computing FK"
+    print(len(eef_poses))
+
+    # yumi.go_to_joints(smoothed_data[-1], yumi.LEFT)
+
+    # for positions in smoothed_data:
+    #     yumi.go_to_joints(positions, yumi.LEFT)
+    waypoints = [eef_pose.pose_stamped[0].pose for eef_pose in eef_poses]
+
+    waypoint_nums = [[waypoint.position.x, waypoint.position.y, waypoint.position.z, 
+                          waypoint.orientation.x, waypoint.orientation.y, waypoint.orientation.z, 
+                          waypoint.orientation.w] for waypoint in waypoints]
+    
+    transfer = [-0.05, -0.1, 0, 0, 0, 0, 1] # defineed relative to gripper_l_base frame
+    # listener = tf.TransformListener()
+    # listener.waitForTransform("world", "gripper_l_base", rospy.Time(), rospy.Duration(4.0))
+    # translation, rotation = listener.lookupTransform("world", "gripper_l_base", rospy.Time(0))
+    # waypoints = apply_transformation(transfer, translation + rotation, waypoint_nums)
+    # yumi.static_tf_broadcast('world', 'target_pose', transfer)
+    # waypoints = [yumi.create_pose(*waypoint) for waypoint in waypoints]
+    waypoints = apply_transformation(transfer, waypoint_nums)
+    waypoints = [yumi.create_pose(*waypoint) for waypoint in waypoints]
+    print(waypoints)
     (plan, fraction) = yumi.group_l.compute_cartesian_path(
                                 waypoints,   # waypoints to follow
                                 0.01,        # eef_step
                                 0.0)         # jump_threshold
-    print(plan)
+
+    # if (fraction == 1.0):
+    #     plan = yumi.group_l.retime_trajectory(yumi.robot.get_current_state(), plan, 0.05, 0.05)
+
+    rospy.loginfo("Displaying trajectories")
     # Initialize the display_trajectory_publisher
     display_trajectory_publisher = rospy.Publisher('/move_group/display_planned_path',
                                                moveit_msgs.msg.DisplayTrajectory,
@@ -90,60 +149,63 @@ def cartesian():
     # Publish
     display_trajectory_publisher.publish(display_trajectory)
 
-    # yumi.group_l.execute(plan, wait=True)
-    rospy.sleep(3)
-    print("============ Waiting ...")
+    # print(plan)
+    yumi.group_l.execute(plan, wait=True)
+    rospy.sleep(1)
+    yumi.gripper_effort(yumi.LEFT, 15)
 
-def run():
+    waypoints = []
 
-    with open("yumi_joint_states.json") as f:
-        db = json.load(f)
-    arm_data = []
+    waypoints.append(yumi.group_l.get_current_pose().pose)
 
-    for data in db:
-        # This check ensures that 'name' and 'position' exist and have the same length
-        if "name" in data and "position" in data and len(data["name"]) == len(data["position"]):
-            joint_data = dict(zip(data["name"], data["position"]))
-            arm_data.append(joint_data)
-    left_hand_data_2d = []
+    # first orient gripper and move forward (+x)
+    wpose = geometry_msgs.msg.Pose()
+    wpose.position.x = waypoints[0].position.x
+    wpose.position.y = waypoints[0].position.y  
+    wpose.position.z = waypoints[0].position.z + 0.2
+    wpose.orientation.x = waypoints[0].orientation.x
+    wpose.orientation.y = waypoints[0].orientation.y
+    wpose.orientation.z = waypoints[0].orientation.z
+    wpose.orientation.w = waypoints[0].orientation.w
+    waypoints.append(copy.deepcopy(wpose))
 
-    # Desired order of joints
-    joint_order = [1, 2, 7, 3, 4, 5, 6]
+    del waypoints[0]
+    # print(waypoints)
+    (plan, fraction) = yumi.group_l.compute_cartesian_path(
+                                waypoints,   # waypoints to follow
+                                0.01,        # eef_step
+                                0.0)         # jump_threshold
+    # print(plan)
+    if (fraction == 1.0):
+        plan = yumi.group_l.retime_trajectory(yumi.robot.get_current_state(), plan, 0.05, 0.05)
+    yumi.group_l.execute(plan, wait=True)
 
-    for data in arm_data:
-        left_hand_data = [data[f'yumi_joint_{i}_l'] for i in joint_order if f'yumi_joint_{i}_l' in data]
-        left_hand_data_2d.append(left_hand_data)
+    rospy.sleep(1)
 
-    print("2D List of Left Hand Data in Specified Order:", left_hand_data_2d)
+def dict_to_joint_state(data):
+    """
+    Convert a dictionary to a JointState message.
 
-    # with open("yumi_left_2d.json", "w") as file:
-    #     json.dump(left_hand_data_2d, file)
+    Parameters:
+    data (dict): A dictionary containing the joint state information.
 
-    # Apply the smoothing function with a chosen threshold (this threshold may need to be adjusted)
-    threshold_value = 0.1
-    smoothed_data = smooth_trajectory(left_hand_data_2d, threshold_value)
-    print(smoothed_data)
-    print(len(smoothed_data))
+    Returns:
+    JointState: A ROS JointState message.
+    """
+    joint_state_msg = JointState()
 
+    # Fill in the header information
+    joint_state_msg.header.seq = data["header"]["seq"]
+    joint_state_msg.header.stamp = rospy.Time(data["header"]["stamp"]["secs"], data["header"]["stamp"]["nsecs"])
+    joint_state_msg.header.frame_id = data["header"]["frame_id"]
 
-    # # Plotting the smoothed trajectory
-    # smoothed_joint_trajectories = list(zip(*smoothed_data))
-    # plt.figure(figsize=(12, 8))
-    # for i, joint_trajectory in enumerate(smoothed_joint_trajectories, start=1):
-    #     plt.plot(joint_trajectory, label=f'Joint {i}')
+    # Fill in the joint names, positions, velocities, and efforts
+    joint_state_msg.name = data["name"]
+    joint_state_msg.position = data["position"]
+    joint_state_msg.velocity = data["velocity"]
+    joint_state_msg.effort = data["effort"]
 
-    # plt.title('Smoothed Trajectory of Robot Arm Joints Over Time')
-    # plt.xlabel('Time Steps')
-    # plt.ylabel('Joint States')
-    # plt.legend()
-    # plt.grid(True)
-    # plt.show()
-
-    # yumi.go_to_joints(smoothed_data[-1], yumi.LEFT)
-
-    # for positions in smoothed_data:
-    #     yumi.go_to_joints(positions, yumi.LEFT)
-
+    return joint_state_msg
 
 
 if __name__ == '__main__':
@@ -153,8 +215,9 @@ if __name__ == '__main__':
     yumi.init_Moveit()
 
     try:
-        cartesian()
-        # run()
+        # cartesian()
+        run()
+        # computeFK()
 
         rospy.spin()
         print("program_finished")

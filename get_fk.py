@@ -64,7 +64,7 @@ class GetFK(object):
             fk_link = self.fk_link
 
         req = GetPositionFKRequest()
-        req.header.frame_id = 'base_link'
+        req.header.frame_id = 'world'
         req.fk_link_names = [self.fk_link]
         req.robot_state.joint_state = joint_state
         try:
@@ -80,6 +80,6 @@ class GetFK(object):
 if __name__ == '__main__':
     rospy.init_node('test_fk')
     rospy.loginfo("Querying for FK")
-    gfk = GetFK('yumi_link_7_r', 'base_link')
+    gfk = GetFK('gripper_l_base', 'world')
     resp = gfk.get_current_fk()
     rospy.loginfo(resp)

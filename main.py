@@ -78,18 +78,20 @@ def run():
     yumi.print_current_joint_states(yumi.LEFT)
 
     # Reset YuMi joints to "home" position
-    yumi.reset_pose()
+    # yumi.reset_pose()
 
+    rospy.sleep(5)
+    yumi.reset_calib()
 
-    # Drive YuMi end effectors to a desired position (pose_ee), and perform a grasping task with a given effort (grip_effort)
-    # Gripper effort: opening if negative, closing if positive, static if zero
-    pose_ee = [0.3, 0.15, 0.2, 0.0, 3.14, 3.14]
-    grip_effort = -10.0
-    move_and_grasp(yumi.LEFT, pose_ee, grip_effort)
+    # # Drive YuMi end effectors to a desired position (pose_ee), and perform a grasping task with a given effort (grip_effort)
+    # # Gripper effort: opening if negative, closing if positive, static if zero
+    # pose_ee = [0.3, 0.15, 0.2, 0.0, 3.14, 3.14]
+    # grip_effort = -10.0
+    # move_and_grasp(yumi.LEFT, pose_ee, grip_effort)
 
-    pose_ee = [0.3, -0.15, 0.2, 0.0, 3.14, 3.14]
-    grip_effort = -10.0
-    move_and_grasp(yumi.RIGHT, pose_ee, grip_effort)
+    # pose_ee = [0.3, -0.15, 0.2, 0.0, 3.14, 3.14]
+    # grip_effort = -10.0
+    # move_and_grasp(yumi.RIGHT, pose_ee, grip_effort)
 
     rospy.spin()
 
