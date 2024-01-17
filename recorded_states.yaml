@@ -1,0 +1,16 @@
+joint_names:
+- yumi_joint_1_l
+- yumi_joint_2_l
+- yumi_joint_7_l
+- yumi_joint_3_l
+- yumi_joint_4_l
+- yumi_joint_5_l
+- yumi_joint_6_l
+joint_values:
+- - -0.9497650861740112
+  - -1.0641388893127441
+  - 1.4860992431640625
+  - 0.18359893560409546
+  - 0.7370399236679077
+  - 0.51058429479599
+  - -0.54864901304245
