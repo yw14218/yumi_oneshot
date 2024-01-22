@@ -1,7 +1,7 @@
 <launch>
   <!-- The rpy in the comment uses the extrinsic XYZ convention, which is the same as is used in a URDF. See
        http://wiki.ros.org/geometry2/RotationMethods and https://en.wikipedia.org/wiki/Euler_angles for more info. -->
-  <!-- xyz="2.40485 -0.415064 1.11965" rpy="0.0430922 -2.16459 1.57144" -->
+  <!-- xyz="1.0087 -0.0448651 0.61351" rpy="0.0254529 -2.14516 1.58115" -->
   <node pkg="tf2_ros" type="static_transform_publisher" name="camera_link_broadcaster"
-      args="2.40485 -0.415064 1.11965   0.617311 0.631207 -0.318428 -0.345119 yumi_base_link camera_color_optical_frame" />
+      args="1.0087 -0.0448651 0.61351   0.620028 0.622197 -0.331751 -0.344062 world camera_color_optical_frame" />
 </launch>
