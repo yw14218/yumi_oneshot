@@ -5,6 +5,7 @@ import torch.nn as nn
 from direct.pointnet2_utils import PointNetSetAbstractionMsg, \
     PointNetSetAbstraction
 from direct.rotation_predictor import RotationPredictor
+from direct.preprocessor import SceneData, Preprocessor
 
 ModelRotPrediction = torch.Tensor
 PredictedRotation = float
@@ -106,12 +107,66 @@ class RotationClassificator(RotationPredictor):
 
 
 if __name__ == "__main__":
-    rand_live = np.random.rand(9, 1000).astype(np.float32)
-    rand_bottle = np.random.rand(9, 1000).astype(np.float32)
+    # rand_live = np.random.rand(9, 1000).astype(np.float32)
+    # rand_bottle = np.random.rand(9, 1000).astype(np.float32)
+
+    # batch = {
+    #     "pointcloud_0": rand_live,
+    #     "pointcloud_1": rand_bottle,
+    # }
+
+    # model = RotationClassificator()
+    # model.load_weights()
+    # print("Parameter count: ", sum(p.numel() for p in model.parameters() if p.requires_grad))
+    # out = model(batch)
+    # print(np.rad2deg(out))
+
+    T_WC = np.load("../handeye/T_WC_head.npy")
+    # intrinsics_0 = np.load("../data/lego/intrinsics_0.npy")
+    # intrinsics_1 = np.load("../data/lego/intrinsics_1.npy")
+    # print(intrinsics_0)
+    # print(intrinsics_1)
+    intrinsics = np.load("../handeye/intrinsics.npy").reshape(3, 3)
+    from PIL import Image
+
+    demon_rgb = Image.open("../data/lego/original/demo_rgb.png")
+    demon_depth = Image.open("../data/lego/original/demo_depth.png")
+    demon_mask = Image.open("../data/lego/original/demo_mask.png")
+    live_rgb = Image.open("../data/lego/original/live_rgb.png")
+    live_depth = Image.open("../data/lego/original/live_depth.png")
+    live_mask = Image.open("../data/lego/original/live_mask.png")
+
+    # Convert the images to numpy arrays for easier manipulation
+    demon_rgb_array = np.array(demon_rgb)
+    demon_depth_array = np.array(demon_depth)
+    demon_mask_array = np.array(demon_mask)
+
+    live_rgb_array = np.array(live_rgb)
+    live_depth_array = np.array(live_depth)
+    live_mask_array = np.array(live_mask)
+
+
+    print(live_mask_array.shape)
+
+    # Create the SceneData instance with the loaded data
+    data = SceneData(
+        image_0=demon_rgb_array,
+        image_1=live_rgb_array,
+        depth_0=demon_depth_array,
+        depth_1=live_depth_array,
+        seg_0=demon_mask_array,
+        seg_1=live_mask_array,
+        intrinsics_0=intrinsics,
+        intrinsics_1=intrinsics,
+        T_WC=T_WC
+    )
+
+    preprocessor = Preprocessor()
+    data.update(preprocessor(data))
 
     batch = {
-        "pointcloud_0": rand_live,
-        "pointcloud_1": rand_bottle,
+        "pointcloud_0": data['pointcloud_0'],
+        "pointcloud_1": data['pointcloud_1']
     }
 
     model = RotationClassificator()

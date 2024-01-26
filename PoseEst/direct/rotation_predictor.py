@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from torch.nn.parameter import Parameter
 
-from direct.rotation_predictor import RotationPredictorBase
+from rotation_predictor import RotationPredictorBase
 
 
 class ProcessedData(TypedDict):

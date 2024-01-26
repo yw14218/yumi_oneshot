@@ -55,8 +55,8 @@ class Preprocessor():
 
         data["depth_0"] = data["depth_0"] / 1000
         data["depth_1"] = data["depth_1"] / 1000
-        data["depth_0"] = data["depth_0"] * (data["depth_0"] < 5.0) * data["seg_0"]
-        data["depth_1"] = data["depth_1"] * (data["depth_1"] < 5.0) * data["seg_1"]
+        data["depth_0"] = data["depth_0"] * (data["depth_0"] < 0.8) * data["seg_0"]
+        data["depth_1"] = data["depth_1"] * (data["depth_1"] < 0.8) * data["seg_1"]
 
         data["image_0"] = data["image_0"].astype(np.float32)
         data["image_1"] = data["image_1"].astype(np.float32)
@@ -156,9 +156,9 @@ class Preprocessor():
         data["pc1"] = data["pc1"][data['pc1_keep_id'], :]
 
         sample_args = np.random.randint(low=0, high=data["pc0"].shape[0], size=self.n_points)
-        data["pc0"] = data["pc0"][sample_args, :]
+        # data["pc0"] = data["pc0"][sample_args, :]
         sample_args = np.random.randint(low=0, high=data["pc1"].shape[0], size=self.n_points)
-        data["pc1"] = data["pc1"][sample_args, :]
+        # data["pc1"] = data["pc1"][sample_args, :]
 
         data["pc0"] = np.concatenate((data["pc0"], data["pc0"][:, :3]), axis=1)
         data["pc1"] = np.concatenate((data["pc1"], data["pc1"][:, :3]), axis=1)

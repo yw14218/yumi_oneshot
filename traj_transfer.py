@@ -15,8 +15,10 @@ import matplotlib.pyplot as plt
 import copy
 from get_fk import GetFK
 from sensor_msgs.msg import JointState
-from preprocessing import filter_joint_states
+from preprocessing import filter_joint_states, translation_from_matrix, quaternion_from_matrix
 import numpy as np
+import tf.transformations as tf_trans
+from scipy.spatial.transform import Rotation as R
 
 def cartesian(): # works!
 
@@ -38,64 +40,6 @@ def cartesian(): # works!
     eef_link = yumi.group_r.get_end_effector_link()
     print("============ Right End effector: {0}".format(eef_link))
 
-    # waypoints = []
-
-    # # start with the current pose
-    # print(yumi.group_l.get_current_pose())
-    # waypoints.append(yumi.group_l.get_current_pose().pose)
-
-    # # first orient gripper and move forward (+x)
-    # wpose = geometry_msgs.msg.Pose()
-    # wpose.position.x = waypoints[0].position.x + 0.1
-    # wpose.position.y = waypoints[0].position.y  
-    # wpose.position.z = waypoints[0].position.z
-    # wpose.orientation.x = waypoints[0].orientation.x
-    # wpose.orientation.y = waypoints[0].orientation.y
-    # wpose.orientation.z = waypoints[0].orientation.z
-    # wpose.orientation.w = waypoints[0].orientation.w
-    # waypoints.append(copy.deepcopy(wpose))
-
-    # wpose = geometry_msgs.msg.Pose()
-    # wpose.position.x = waypoints[0].position.x
-    # wpose.position.y = waypoints[0].position.y + 0.1
-    # wpose.position.z = waypoints[0].position.z
-    # wpose.orientation.x = waypoints[0].orientation.x
-    # wpose.orientation.y = waypoints[0].orientation.y
-    # wpose.orientation.z = waypoints[0].orientation.z
-    # wpose.orientation.w = waypoints[0].orientation.w
-    # waypoints.append(copy.deepcopy(wpose))
-
-    # wpose = geometry_msgs.msg.Pose()
-    # wpose.position.x = waypoints[0].position.x
-    # wpose.position.y = waypoints[0].position.y 
-    # wpose.position.z = waypoints[0].position.z + 0.1
-    # wpose.orientation.x = waypoints[0].orientation.x
-    # wpose.orientation.y = waypoints[0].orientation.y
-    # wpose.orientation.z = waypoints[0].orientation.z
-    # wpose.orientation.w = waypoints[0].orientation.w
-    # waypoints.append(copy.deepcopy(wpose))
-
-    # del waypoints[0]
-    # # print(waypoints)
-    # (plan, fraction) = yumi.group_l.compute_cartesian_path(
-    #                             waypoints,   # waypoints to follow
-    #                             0.01,        # eef_step
-    #                             0.0)         # jump_threshold
-    # # print(plan)
-    # # Initialize the display_trajectory_publisher
-    # display_trajectory_publisher = rospy.Publisher('/move_group/display_planned_path',
-    #                                            moveit_msgs.msg.DisplayTrajectory,
-    #                                            queue_size=20)
-    # display_trajectory = moveit_msgs.msg.DisplayTrajectory()
-    # display_trajectory.trajectory_start = yumi.robot.get_current_state()
-    # display_trajectory.trajectory.append(plan)
-    # # Publish
-    # display_trajectory_publisher.publish(display_trajectory)
-
-    # yumi.group_l.execute(plan, wait=True)
-    # rospy.sleep(3)
-    # print("============ Waiting ...")
-
 def run():
 
     with open("yumi_joint_states.json") as f:
@@ -115,23 +59,40 @@ def run():
     # for positions in smoothed_data:
     #     yumi.go_to_joints(positions, yumi.LEFT)
     waypoints = [eef_pose.pose_stamped[0].pose for eef_pose in eef_poses]
-
-    # waypoint_nums = [[waypoint.position.x, waypoint.position.y, waypoint.position.z, 
-    #                       waypoint.orientation.x, waypoint.orientation.y, waypoint.orientation.z, 
-    #                       waypoint.orientation.w] for waypoint in waypoints]
+    waypoint_nums = [[waypoint.position.x, waypoint.position.y, waypoint.position.z, 
+                        waypoint.orientation.x, waypoint.orientation.y, waypoint.orientation.z, 
+                        waypoint.orientation.w] for waypoint in waypoints]
     
-    # transfer = [-0.05, -0.1, 0, 0, 0, 0, 1] # defineed relative to gripper_l_base frame
-    # # listener = tf.TransformListener()
-    # # listener.waitForTransform("world", "gripper_l_base", rospy.Time(), rospy.Duration(4.0))
-    # # translation, rotation = listener.lookupTransform("world", "gripper_l_base", rospy.Time(0))
-    # # waypoints = apply_transformation(transfer, translation + rotation, waypoint_nums)
-    # # yumi.static_tf_broadcast('world', 'target_pose', transfer)
-    # # waypoints = [yumi.create_pose(*waypoint) for waypoint in waypoints]
-    # waypoints = apply_transformation(transfer, waypoint_nums)
-    # waypoints = [yumi.create_pose(*waypoint) for waypoint in waypoints]
-    print(waypoints)
+    delta_R = np.array([
+        [0.98628563,  0.16504762,  0.,          0.07052299],
+        [-0.16504762, 0.98628563,  0.,          0.0126316 ],
+        [0.,          0.,          1.,         -0.00986874],
+        [0.,          0.,          0.,          1.        ]
+    ])
+
+
+    transformed_waypoints = []
+    # Apply the transformation to each waypoint
+    for waypoint in waypoint_nums:
+        waypoint_translation = waypoint[:3]
+        waypoint_rotation = R.from_quat(waypoint[3:7]).as_matrix()
+
+        RW = np.eye(4)
+        RW[:3, :3] = waypoint_rotation
+        RW[:3, 3] = waypoint_translation
+
+        # Apply the composite transformation
+        transformed_matrix = delta_R @ RW
+        transformed_translation = translation_from_matrix(transformed_matrix)
+        transformed_quaternion = quaternion_from_matrix(transformed_matrix)
+
+        transformed_waypoints.append(np.concatenate((transformed_translation, transformed_quaternion)).tolist())
+
+    new_waypoints = [yumi.create_pose(*waypoint) for waypoint in transformed_waypoints]
+    print(new_waypoints)
+
     (plan, fraction) = yumi.group_l.compute_cartesian_path(
-                                waypoints,   # waypoints to follow
+                                new_waypoints,   # waypoints to follow
                                 0.01,        # eef_step
                                 0.0)         # jump_threshold
 
@@ -149,7 +110,7 @@ def run():
     # Publish
     display_trajectory_publisher.publish(display_trajectory)
 
-    # print(plan)
+    print(plan)
     yumi.group_l.execute(plan, wait=True)
     rospy.sleep(1)
     yumi.gripper_effort(yumi.LEFT, 15)
