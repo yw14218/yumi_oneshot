@@ -556,6 +556,9 @@ def reset_pose():
 
     reset_arm(BOTH)
 
+
+
+
 # Resets both arms to calib
 def reset_calib():
     """Resets an arm
@@ -570,8 +573,6 @@ def reset_calib():
     safeJointPositionR = [4.137169526075013e-05, -2.268953800201416, -2.356186628341675, 0.5236199498176575, -6.807099998695776e-05, 0.6980842351913452, -4.788856676896103e-05]
     safeJointPositionL = [8.723969949642196e-05, -2.268956184387207, 2.35611629486084, 0.5236671566963196, 4.085124237462878e-05, 0.6981115341186523, 2.6177165636909194e-05]
 
-    global group_l
-    global group_r
     global group_both
 
 
@@ -581,6 +582,10 @@ def reset_calib():
     gripper_effort(RIGHT, -15.0)
 
     rospy.sleep(1)
+
+
+
+
 
 def static_tf_broadcast(parent_id, child_id, pose_in_list) -> None:
     br = tf2_ros.StaticTransformBroadcaster()
@@ -596,4 +601,4 @@ def static_tf_broadcast(parent_id, child_id, pose_in_list) -> None:
     static_transformStamped.transform.rotation.z = pose_in_list[5]
     static_transformStamped.transform.rotation.w = pose_in_list[6]
     br.sendTransform(static_transformStamped)
-    print("tf of target link successfully sent")
+    print("TF of target link successfully sent")
