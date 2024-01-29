@@ -74,6 +74,7 @@ def move_upwards():
     wpose.orientation = copy.deepcopy(initial_pose.orientation)
     waypoints.append(copy.deepcopy(wpose))
 
+    del waypoints[0]
     (plan, fraction) = yumi.group_l.compute_cartesian_path(waypoints, 0.01, 0.0)
     if fraction == 1.0:
         plan = yumi.group_l.retime_trajectory(yumi.robot.get_current_state(), plan, 0.05, 0.05)
@@ -85,8 +86,10 @@ def parse_args():
     return parser.parse_args()
 
 
-def run(file_name):
+def run():
     try:
+        file_name="lift_lego_left.json"
+
         with open(file_name) as f:
             joint_states = json.load(f)
 
@@ -102,26 +105,38 @@ def run(file_name):
         waypoints = [eef_pose.pose_stamped[0].pose for eef_pose in eef_poses_left]
 
         # Planning and executing transferred trajectories
-        # delta_R = np.array([
-        #     [0.98628563,  0.16504762,  0.,          0.07052299],
-        #     [-0.16504762, 0.98628563,  0.,          0.0126316 ],
-        #     [0.,          0.,          1.,         -0.00986874],
-        #     [0.,          0.,          0.,          1.        ]
-        # ])
-        # transformed_waypoints = apply_transformation_to_waypoints(eef_poses_left, delta_R)
-        # new_waypoints = [yumi.create_pose(*waypoint) for waypoint in transformed_waypoints]
-        # rospy.loginfo(new_waypoints)
+        delta_R = np.array([
+            [ 0.79857538, -0.60179267, -0.011088  ,  0.28067213],
+            [ 0.60165335,  0.79864132, -0.01361215, -0.38310653],
+            [ 0.01704703,  0.00419919,  0.99984587, -0.00643008],
+            [ 0.        ,  0.        ,  0.        ,  1.        ]
+        ])
+        transformed_waypoints = apply_transformation_to_waypoints(eef_poses_left, delta_R)
+        new_waypoints = [yumi.create_pose(*waypoint) for waypoint in transformed_waypoints]
+        rospy.loginfo(len(new_waypoints))
 
-        (plan, fraction) = yumi.group_l.compute_cartesian_path(waypoints, 0.01, 0.0)
+        # coarse_plan = yumi.plan_and_move(yumi.group_l, new_waypoints[-5])
+
+        plan = yumi.plan(yumi.group_l, new_waypoints[-5])
+        filtered_joint_states = filter_joint_states(joint_states, 0.1)
+        eef_poses_left = [gfk_left.get_fk(msg) for msg in msgs]
+        transformed_waypoints = apply_transformation_to_waypoints(eef_poses_left, delta_R)
+        new_waypoints += [yumi.create_pose(*waypoint) for waypoint in transformed_waypoints]
+        rospy.loginfo(new_waypoints)
+
+        (fine_plan, fraction) = yumi.group_l.compute_cartesian_path(new_waypoints, 0.01, 0.0)
+        print(fraction)
         # plan = yumi.group_l.retime_trajectory(yumi.robot.get_current_state(), plan, 0.1, 0.1)
+        # AddTimeParameterization to better replicate demo dynamics
+
         display_trajectory(plan)
 
         yumi.group_l.execute(plan, wait=True)
         rospy.sleep(1)
 
-        # # Additional movement planning
-        # yumi.gripper_effort(yumi.LEFT, 15)
-        # move_upwards()
+        # Additional movement planning
+        yumi.gripper_effort(yumi.LEFT, 15)
+        move_upwards()
 
     except rospy.ROSInterruptException:
         pass
@@ -133,9 +148,9 @@ if __name__ == '__main__':
     rospy.init_node('yumi_replay_trajectory')
     yumi.init_Moveit()
 
-    args = parse_args()
+    # args = parse_args()
 
     try:
-        run(args.file_name)
+        run()
     except rospy.ROSInterruptException:
         rospy.logerr("ROS Interrupted")

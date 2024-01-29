@@ -18,7 +18,7 @@ RIGHT = 1       #:ID of the right arm
 BOTH = 3        #:ID of both_arms
 PI = 3.1415926  #:Value of PI
 
-table_height = 0.075 #:The height of the upper surface of the table
+table_height = 0.1 #:The height of the upper surface of the table
 table_distance_x = 0.74
 
 global group_l  #:The move group for the left arm
@@ -466,6 +466,34 @@ def traverse_path(points, arm, planning_tries = 500):
         # traverse_pathDual(points, planning_tries)
         pass
 
+
+
+
+#Plan a trajectory and execute it
+def plan(move_group, target):
+    """Plans and moves a group to target
+
+    Creates a plan to move a move_group to the given target. Used by go_to_simple
+
+    :param move_group: The group to move
+    :param target: The pose to move to
+    :type move_group: MoveGroup
+    :type target: PoseStamped
+    :returns: Nothing
+    :rtype: None
+    """
+    euler = tf.transformations.euler_from_quaternion((target.orientation.x, target.orientation.y, target.orientation.z, target.orientation.w))
+
+    if (move_group == group_l):
+        arm = 'left'
+    if (move_group == group_r):
+        arm = 'right'
+
+    rospy.loginfo('Planning and moving ' + arm + ' arm: Position: {' + str(target.position.x) + ';' + str(target.position.y) + ';' + str(target.position.z) +
+                                        '}. Rotation: {' + str(euler[0]) + ';' + str(euler[1]) + ';' + str(euler[2]) + '}.')
+    move_group.set_pose_target(target)
+    plan = move_group.plan()
+    return plan
 
 
 
