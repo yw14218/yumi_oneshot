@@ -49,7 +49,7 @@ def quaternion_from_matrix(matrix):
     return rotation.as_quat()
 
 
-def apply_transformation_to_waypoints(eef_poses, delta_R):
+def apply_transformation_to_waypoints(waypoints_np, delta_R):
     """
     Apply a transformation to a list of end-effector poses using NumPy vectorization.
 
@@ -60,11 +60,6 @@ def apply_transformation_to_waypoints(eef_poses, delta_R):
     Returns:
     list: Transformed waypoints.
     """
-    # Extract waypoint data
-    waypoints = [eef_pose.pose_stamped[0].pose for eef_pose in eef_poses]
-    waypoints_np= np.array([[waypoint.position.x, waypoint.position.y, waypoint.position.z,
-                               waypoint.orientation.x, waypoint.orientation.y, waypoint.orientation.z,
-                               waypoint.orientation.w] for waypoint in waypoints])
 
     # Separate translations and rotations
     translations = waypoints_np[:, :3]
@@ -74,7 +69,7 @@ def apply_transformation_to_waypoints(eef_poses, delta_R):
     waypoint_rot_matrices = R.from_quat(rotations).as_matrix()
 
     # Construct 4x4 matrices for waypoints
-    RW_matrices = np.zeros((len(waypoints), 4, 4))
+    RW_matrices = np.zeros((waypoints_np.shape[0], 4, 4))
     RW_matrices[:, :3, :3] = waypoint_rot_matrices
     RW_matrices[:, :3, 3] = translations
     RW_matrices[:, 3, 3] = 1
