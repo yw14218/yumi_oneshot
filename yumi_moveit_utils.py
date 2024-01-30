@@ -511,6 +511,7 @@ def plan_and_move(move_group, target):
     :returns: Nothing
     :rtype: None
     """
+
     euler = tf.transformations.euler_from_quaternion((target.orientation.x, target.orientation.y, target.orientation.z, target.orientation.w))
 
     if (move_group == group_l):
@@ -549,20 +550,20 @@ def reset_arm(arm):
         group_r.set_joint_value_target(safeJointPositionR)
         group_r.plan()
         group_r.go(wait=True)
-        gripper_effort(RIGHT, 15.0)
+        gripper_effort(RIGHT, -15.0)
         gripper_effort(RIGHT, 0.0)
     elif (arm == LEFT):
         group_l.set_joint_value_target(safeJointPositionL)
         group_l.plan()
         group_l.go(wait=True)
-        gripper_effort(LEFT, 15.0)
+        gripper_effort(LEFT, -15.0)
         gripper_effort(LEFT, 0.0)
     elif (arm == BOTH):
         group_both.set_joint_value_target(safeJointPositionL + safeJointPositionR)
         group_both.go(wait=True)
-        gripper_effort(LEFT, 15.0)
+        gripper_effort(LEFT, -15.0)
         gripper_effort(LEFT, 0.0)
-        gripper_effort(RIGHT, 15.0)
+        gripper_effort(RIGHT, -15.0)
         gripper_effort(RIGHT, 0.0)
 
     rospy.sleep(1)
@@ -574,13 +575,13 @@ def reset_arm(arm):
 def reset_pose():
     """Resets YuMi
 
-    Moves YuMi arms to an initial joint position with grippers closed
+    Moves YuMi arms to an initial joint position with grippers open
 
     :returns: Nothing
     :rtype: None
     """
 
-    print("Resetting YuMi arms to an initial joint position with grippers closed")
+    print("Resetting YuMi arms to an initial joint position with grippers open")
 
     reset_arm(BOTH)
 
