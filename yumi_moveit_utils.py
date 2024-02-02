@@ -104,6 +104,15 @@ def init_Moveit():
     group_both.set_goal_orientation_tolerance(0.005)
     group_both.set_max_velocity_scaling_factor(0.2)
 
+    # fede_both = moveit_commander.MoveGroupCommander("fede_both")
+    # fede_both.set_planner_id("ESTkConfigDefault")
+    # fede_both.set_pose_reference_frame("world")
+    # fede_both.allow_replanning(False)
+    # fede_both.set_goal_position_tolerance(0.005)
+    # fede_both.set_goal_orientation_tolerance(0.005)
+    # fede_both.set_max_velocity_scaling_factor(0.2)
+
+
     display_trajectory_publisher = rospy.Publisher('/move_group/display_planned_path', 	moveit_msgs.msg.DisplayTrajectory, queue_size=20)
     rospy.sleep(3)
     print("####################################     Finished Initialization     ####################################")
@@ -590,15 +599,7 @@ def reset_pose():
 
 # Resets both arms to calib
 def reset_calib():
-    """Resets an arm
-
-    Resets a single arm to its reset position
-
-    :param arm: The selected arm (LEFT or RIGHT)
-    :type arm: int
-    :returns: Nothing
-    :rtype: None
-    """
+    
     safeJointPositionR = [4.137169526075013e-05, -2.268953800201416, -2.356186628341675, 0.5236199498176575, -6.807099998695776e-05, 0.6980842351913452, -4.788856676896103e-05]
     safeJointPositionL = [8.723969949642196e-05, -2.268956184387207, 2.35611629486084, 0.5236671566963196, 4.085124237462878e-05, 0.6981115341186523, 2.6177165636909194e-05]
 
@@ -608,13 +609,31 @@ def reset_calib():
     group_both.set_joint_value_target(safeJointPositionL + safeJointPositionR)
     group_both.go(wait=True)
     gripper_effort(LEFT, -15.0)
+    gripper_effort(LEFT, 0.0)
     gripper_effort(RIGHT, -15.0)
+    gripper_effort(RIGHT, 0.0)
 
-    rospy.sleep(1)
+    rospy.sleep(0.1)
 
 
 
+# Resets both arms to init
+def reset_init():
 
+    safeJointPositionL = [-0.1346624195575714, -1.2939683198928833, 1.152125597000122, 0.8828295469284058, -1.433053731918335, -0.6675148606300354, -0.33587437868118286]
+    safeJointPositionR = [0.13037508726119995, -1.293479084968567, -1.1520023345947266, 0.882483184337616, 1.4386858940124512, -0.6661921739578247, 0.3313935697078705]
+
+    global group_both
+
+
+    group_both.set_joint_value_target(safeJointPositionL + safeJointPositionR)
+    group_both.go(wait=True)
+    gripper_effort(LEFT, -15.0)
+    gripper_effort(LEFT, 0.0)
+    gripper_effort(RIGHT, -15.0)
+    gripper_effort(RIGHT, 0.0)
+
+    rospy.sleep(0.1)
 
 def static_tf_broadcast(parent_id, child_id, pose_in_list) -> None:
     br = tf2_ros.StaticTransformBroadcaster()

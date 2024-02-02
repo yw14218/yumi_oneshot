@@ -170,68 +170,63 @@ def planKDL(Y, gfk_left, T_delta_world = None):
 
 
 def run(gfk_left):
-    try:
-        file_name="lift_lego_left.json"
+    file_name="data/lego/lift_lego_left.json"
 
-        with open(file_name) as f:
-            joint_states = json.load(f)
+    with open(file_name) as f:
+        joint_states = json.load(f)
 
-        filtered_joint_states = filter_joint_states(joint_states, 0.01)
-        msgs = [dict_to_joint_state(filtered_joint_state) for filtered_joint_state in filtered_joint_states]
-        rospy.loginfo("{} waypoints in the trajectory".format(len(msgs)))
+    filtered_joint_states = filter_joint_states(joint_states, 0.01)
+    msgs = [dict_to_joint_state(filtered_joint_state) for filtered_joint_state in filtered_joint_states]
+    rospy.loginfo("{} waypoints in the trajectory".format(len(msgs)))
 
-        eef_poses_left = [gfk_left.get_fk(msg) for msg in msgs]
-        assert len(eef_poses_left) == len(msgs), "Error in computing FK"
+    eef_poses_left = [gfk_left.get_fk(msg) for msg in msgs]
+    assert len(eef_poses_left) == len(msgs), "Error in computing FK"
 
-        # Planning and executing transferred trajectories
-        T_delta_world = np.array([
-            [ 0.79857538, -0.60179267, -0.011088  ,  0.28067213],
-            [ 0.60165335,  0.79864132, -0.01361215, -0.38310653],
-            [ 0.01704703,  0.00419919,  0.99984587, -0.00643008],
-            [ 0.        ,  0.        ,  0.        ,  1.        ]
-        ])
+    # Planning and executing transferred trajectories
+    T_delta_world = np.array([
+        [ 0.79857538, -0.60179267, -0.011088  ,  0.28067213],
+        [ 0.60165335,  0.79864132, -0.01361215, -0.38310653],
+        [ 0.01704703,  0.00419919,  0.99984587, -0.00643008],
+        [ 0.        ,  0.        ,  0.        ,  1.        ]
+    ])
 
-        # Planning and executing trajectories
-        waypoints = [eef_pose.pose_stamped[0].pose for eef_pose in eef_poses_left]
-        waypoints_np = np.array([[waypoint.position.x, waypoint.position.y, waypoint.position.z,
-                                waypoint.orientation.x, waypoint.orientation.y, waypoint.orientation.z,
-                                waypoint.orientation.w] for waypoint in waypoints])
-        
-        split_index = int(waypoints_np.shape[0] * 0.7)
+    # Planning and executing trajectories
+    waypoints = [eef_pose.pose_stamped[0].pose for eef_pose in eef_poses_left]
+    waypoints_np = np.array([[waypoint.position.x, waypoint.position.y, waypoint.position.z,
+                            waypoint.orientation.x, waypoint.orientation.y, waypoint.orientation.z,
+                            waypoint.orientation.w] for waypoint in waypoints])
+    
+    split_index = int(waypoints_np.shape[0] * 0.7)
 
-        # choose one
-        Y = dmp(waypoints_np[:split_index], T_delta_world)
-        # Y = planKDL(waypoints_np[:split_index], gfk_left, T_delta_world)
+    # choose one
+    Y = dmp(waypoints_np[:split_index], T_delta_world)
+    # Y = planKDL(waypoints_np[:split_index], gfk_left, T_delta_world)
 
-        transformed_fine_waypoints = apply_transformation_to_waypoints(waypoints_np[split_index:], T_delta_world)
-        fine_waypoints = [yumi.create_pose(*waypoint) for waypoint in transformed_fine_waypoints]
+    transformed_fine_waypoints = apply_transformation_to_waypoints(waypoints_np[split_index:], T_delta_world)
+    fine_waypoints = [yumi.create_pose(*waypoint) for waypoint in transformed_fine_waypoints]
 
-        coarse_waypoints = [yumi.create_pose(*waypoint) for waypoint in Y][::2] # downsample
+    coarse_waypoints = [yumi.create_pose(*waypoint) for waypoint in Y][::2] # downsample
 
-        whole_waypoints = coarse_waypoints + fine_waypoints
-        print(type(fine_waypoints[0]))
+    whole_waypoints = coarse_waypoints + fine_waypoints
+    print(type(fine_waypoints[0]))
 
-        yumi.group_l.set_pose_target(fine_waypoints[0])
-        plan = yumi.group_l.plan()
-        yumi.group_l.go(wait=True)
-        rospy.sleep(1.5)
-        (plan, fraction) = yumi.group_l.compute_cartesian_path(fine_waypoints, 0.01, 0.0)
-        # AddTimeParameterization to better replicate demo dynamics
-        plan = yumi.group_l.retime_trajectory(yumi.robot.get_current_state(), plan, 0.5, 0.5)
+    yumi.group_l.set_pose_target(fine_waypoints[0])
+    plan = yumi.group_l.plan()
+    yumi.group_l.go(wait=True)
+    rospy.sleep(1.5)
+    (plan, fraction) = yumi.group_l.compute_cartesian_path(fine_waypoints, 0.01, 0.0)
+    # AddTimeParameterization to better replicate demo dynamics
+    plan = yumi.group_l.retime_trajectory(yumi.robot.get_current_state(), plan, 0.5, 0.5)
 
-        display_trajectory(plan)
+    display_trajectory(plan)
 
-        yumi.group_l.execute(plan, wait=True)
-        rospy.sleep(1)
+    yumi.group_l.execute(plan, wait=True)
+    rospy.sleep(1)
 
-        # Additional movement planning
-        yumi.gripper_effort(yumi.LEFT, 15)
-        move_upwards()
+    # Additional movement planning
+    yumi.gripper_effort(yumi.LEFT, 15)
+    move_upwards()
 
-    except rospy.ROSInterruptException:
-        pass
-    except Exception as e:
-        rospy.logerr("Error in run function: {0}".format(e))
 
 
 if __name__ == '__main__':

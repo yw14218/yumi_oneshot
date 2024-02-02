@@ -72,27 +72,37 @@ def run():
     #Start by connecting to ROS and MoveIt!
     yumi.init_Moveit()
 
-
-    # Print current joint angles
-    yumi.print_current_joint_states(yumi.RIGHT)
-    yumi.print_current_joint_states(yumi.LEFT)
-
     # Reset YuMi joints to "home" position
     # yumi.reset_pose()
 
-    rospy.sleep(5)
-    yumi.reset_calib()
+    # # yumi.reset_calib()
+    # yumi.reset_init()
 
+    left = yumi.get_current_pose(yumi.LEFT)
+    right = yumi.get_current_pose(yumi.RIGHT)
+
+
+    print(left)
+    print(right)
+
+
+    # yumi.reset_init()
     # # Drive YuMi end effectors to a desired position (pose_ee), and perform a grasping task with a given effort (grip_effort)
     # # Gripper effort: opening if negative, closing if positive, static if zero
-    # pose_ee = [0.3, 0.15, 0.2, 0.0, 3.14, 3.14]
+
+    # pose_ee = [0.25, 0.34, 0.47, -3.14, 0, 0]
     # grip_effort = -10.0
     # move_and_grasp(yumi.LEFT, pose_ee, grip_effort)
 
-    # pose_ee = [0.3, -0.15, 0.2, 0.0, 3.14, 3.14]
+    # pose_ee = [0.381, -0.0335, 0.378, -2.31087, -0.12899, 0.15397]
     # grip_effort = -10.0
     # move_and_grasp(yumi.RIGHT, pose_ee, grip_effort)
 
+
+    # Print current joint angles
+    # yumi.print_current_joint_states(yumi.RIGHT)
+    yumi.print_current_joint_states(yumi.LEFT)
+    
     rospy.spin()
 
 
