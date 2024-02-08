@@ -122,20 +122,20 @@ def run():
     yumi.group_both.set_joint_value_target(ik_left[:7] + ik_right[9:16])
     yumi.group_both.go(wait=True)
 
-    (plan, fraction) = yumi.group_l.compute_cartesian_path(waypoints_left, 0.01, 0.0)
+    # (plan, fraction) = yumi.group_l.compute_cartesian_path(waypoints_left, 0.01, 0.0)
 
-    # AddTimeParameterization to better replicate demo dynamics
-    plan = yumi.group_l.retime_trajectory(yumi.robot.get_current_state(), plan, 0.5, 0.5)
+    # # AddTimeParameterization to better replicate demo dynamics
+    # plan = yumi.group_l.retime_trajectory(yumi.robot.get_current_state(), plan, 0.5, 0.5)
 
 
-    yumi.group_l.execute(plan, wait=True)
+    # yumi.group_l.execute(plan, wait=True)
 
-    (plan, fraction) = yumi.group_r.compute_cartesian_path(waypoints_right, 0.01, 0.0)
+    # (plan, fraction) = yumi.group_r.compute_cartesian_path(waypoints_right, 0.01, 0.0)
 
-    # AddTimeParameterization to better replicate demo dynamics
-    plan = yumi.group_r.retime_trajectory(yumi.robot.get_current_state(), plan, 0.5, 0.5)
+    # # AddTimeParameterization to better replicate demo dynamics
+    # plan = yumi.group_r.retime_trajectory(yumi.robot.get_current_state(), plan, 0.5, 0.5)
 
-    yumi.group_r.execute(plan, wait=True)
+    # yumi.group_r.execute(plan, wait=True)
     
 
 

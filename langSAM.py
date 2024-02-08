@@ -141,7 +141,7 @@ if __name__ == '__main__':
 
     assert live_rgb.shape[0] == live_depth.shape[0] == 720
 
-    live_mask = langSAMProcessor.inference(live_rgb, single_mask=True, visualize_info=False)
+    live_mask = langSAMProcessor.inference(live_rgb, single_mask=True, visualize_info=True)
     if live_mask is None:
         rospy.loginfo("No valid masks returned from inference.")
         raise ConnectionAbortedError

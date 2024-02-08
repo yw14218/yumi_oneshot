@@ -45,16 +45,39 @@ class PoseEstimation:
 
         return live_rgb, live_depth
 
+    def inference_and_save(self, folder_path):
+        live_rgb, live_depth = self.get_live_data()
+        rgb_image = Image.fromarray(live_rgb)
+        depth_image = Image.fromarray(live_depth)
 
-    def process_data(self, live_rgb, live_depth):
-        live_mask = self.langSAMProcessor.inference(live_rgb, single_mask=True, visualize_info=False)
-        if live_mask is None:
-            rospy.loginfo("No valid masks returned from inference.")
-            raise ConnectionAbortedError
+        # Ensure mask_np is correctly generated and not None before proceeding
+        mask_np = self.langSAMProcessor.inference(live_rgb, single_mask=True, visualize_info=True)
+        if mask_np is None:
+            raise ValueError("No mask returned from inference.")
+
+        mask_image = Image.fromarray((mask_np * 255).astype(np.uint8))
+
+        import os
+        self.live_rgb_path = os.path.join(folder_path, "live_rgb.png")
+        self.live_depth_path = os.path.join(folder_path, "live_depth.png")
+        self.live_mask_path = os.path.join(folder_path, "live_mask.png")
+        rgb_image.save(self.live_rgb_path)
+        depth_image.save(self.live_depth_path)
+        mask_image.save(self.live_mask_path)
+
+        return rgb_image, depth_image, mask_image
+
+
+    def process_data(self, rgb_image, depth_image, mask_image):
+
 
         demo_rgb = np.array(Image.open(self.demo_rgb_path))
         demo_depth = np.array(Image.open(self.demo_depth_path))
         demo_mask = np.array(Image.open(self.demo_mask_path))
+        
+        live_rgb = np.array(rgb_image)
+        live_depth = np.array(depth_image)
+        live_mask = np.array(mask_image)
         intrinsics = np.load(self.intrinsics_path)
 
         data = SceneData(
@@ -63,7 +86,7 @@ class PoseEstimation:
             depth_0=demo_depth,
             depth_1=live_depth,
             seg_0=demo_mask,
-            seg_1=(live_mask * 255).astype(np.uint8),
+            seg_1=live_mask,
             intrinsics_0=intrinsics,
             intrinsics_1=intrinsics,
             T_WC=np.eye(4)  # cam frame
@@ -75,17 +98,6 @@ class PoseEstimation:
         return data
 
     def estimate_pose(self, data):
-        pcd0 = o3d.geometry.PointCloud()
-        pcd1 = o3d.geometry.PointCloud()
-
-        pcd0.points = o3d.utility.Vector3dVector(data["pc0"][:, :3])
-        pcd1.points = o3d.utility.Vector3dVector(data["pc1"][:, :3])
-
-        # o3d.visualization.draw_geometries([pcd0, pcd1])
-
-        # Estimate normals for each point cloud
-        pcd0.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=40))
-        pcd1.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=40))
 
         # Function to draw registration results
         def draw_registration_result(source, target, transformation):
@@ -95,6 +107,20 @@ class PoseEstimation:
             source_temp.paint_uniform_color([1, 0.706, 0])
             target_temp.paint_uniform_color([0, 0.651, 0.929])
             o3d.visualization.draw_geometries([source_temp, target_temp])
+
+        pcd0 = o3d.geometry.PointCloud()
+        pcd1 = o3d.geometry.PointCloud()
+
+        pcd0.points = o3d.utility.Vector3dVector(data["pc0"][:, :3])
+        pcd1.points = o3d.utility.Vector3dVector(data["pc1"][:, :3])
+
+
+        # o3d.visualization.draw_geometries([pcd0, pcd1])
+
+        # Estimate normals for each point cloud
+        pcd0.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=40))
+        pcd1.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=40))
+
 
         # Compute FPFH features
         voxel_size = 0.05  # Set voxel size for downsampling (adjust based on your data)
@@ -139,28 +165,34 @@ class PoseEstimation:
         T_delta_cam = reg_p2p.transformation
 
         # Draw the result
-        draw_registration_result(pcd0, pcd1, T_delta_cam)
-
+        # draw_registration_result(pcd0, pcd1, T_delta_cam)
+        rospy.loginfo(f"ICP Fitness: {reg_p2p.fitness}")
+        rospy.loginfo(f"ICP Inlier RMSE: {reg_p2p.inlier_rmse}")
+        
         T_WC = np.load("handeye/T_WC_head.npy")
         T_delta_world = T_WC @ T_delta_cam @ pose_inv(T_WC)
         rospy.loginfo("T_delta_world is {0}".format(T_delta_world))
 
         return T_delta_world
 
-    def run(self):
-        live_rgb, live_depth = self.get_live_data()
-        data = self.process_data(live_rgb, live_depth)
+    def run(self, output_path):
+        rgb_image, depth_image, mask_image = self.inference_and_save(output_path)
+        data = self.process_data(rgb_image, depth_image, mask_image)
         return self.estimate_pose(data)
 
 if __name__ == '__main__':
     rospy.init_node('PoseEstimation', anonymous=True)
     pose_estimator = PoseEstimation(
         text_prompt="lego",
-        demo_rgb_path="data/lego/demo_rgb.png",
-        demo_depth_path="data/lego/demo_depth.png",
-        demo_mask_path="data/lego/demo_mask.png",
+        demo_rgb_path="data/lego_split/demo_rgb.png",
+        demo_depth_path="data/lego_split/demo_depth.png",
+        demo_mask_path="data/lego_split/demo_mask.png",
         intrinsics_path="handeye/intrinsics.npy",
         T_WC_path="handeye/T_WC_head.npy"
     )
-    T_delta_world = pose_estimator.run()
+    try:
+        T_delta_world = pose_estimator.run(output_path="data/lego_split/")
+
+    except Exception as e:
+        print(f"Error: {e}")
 
