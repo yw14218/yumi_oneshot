@@ -88,8 +88,8 @@ class RobotListener:
         rospy.init_node('yumi_joint_gripper_state_listener', anonymous=True)
         rospy.Subscriber(JOINT_TOPIC_NAME, JointState, self.handler.add_joint_state)
         rospy.on_shutdown(self.handler.write_to_file)
-        self.user_input_thread = threading.Thread(target=user_input_thread, args=(self.handler,))
-        self.user_input_thread.start()
+        # self.user_input_thread = threading.Thread(target=user_input_thread, args=(self.handler,))
+        # self.user_input_thread.start()
 
     def start(self):
         rospy.spin()

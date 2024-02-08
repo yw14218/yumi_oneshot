@@ -17,7 +17,7 @@ class JointStatePublisher:
         self.gripper_right_topic = "/yumi/gripper_r_effort_cmd"
 
         # Read and filter joint states from file
-        self.joint_states = filter_joint_states(self.read_from_file(), 0.01)
+        self.joint_states = filter_joint_states(self.read_from_file(), 0.0)
         
         # Initialize ROS publishers for each arm
         self.publisher_left = rospy.Publisher(self.topic_name_left, JointTrajectory, queue_size=10)
@@ -80,6 +80,7 @@ class JointStatePublisher:
         
         point = JointTrajectoryPoint()
         point.positions = [joint_state["position"][i] for i, name in enumerate(joint_state["name"]) if arm_suffix in name]
+        point.velocities = [joint_state["velocity"][i] for i, name in enumerate(joint_state["name"]) if arm_suffix in name]
         point.effort = [joint_state["effort"][i] for i, name in enumerate(joint_state["name"]) if arm_suffix in name]
         point.time_from_start = rospy.Duration(0.2)
         
@@ -87,6 +88,6 @@ class JointStatePublisher:
         return joint_traj
 
 if __name__ == '__main__':
-    input_file = "split_lego_both.json"  # Ensure correct path
+    input_file = "data/split_lego/left.json"  # Ensure correct path
     joint_state_publisher = JointStatePublisher(input_file)
     joint_state_publisher.publish_joint_states()

@@ -82,7 +82,7 @@ def display_trajectory(plan):
     display_trajectory.trajectory.append(plan)
     display_trajectory_publisher.publish(display_trajectory)
 
-def move_upwards():
+def move_upwards(distance = 0.15):
     """
     Plan and execute a movement upwards.
     """
@@ -94,7 +94,7 @@ def move_upwards():
     wpose = geometry_msgs.msg.Pose()
     wpose.position.x = initial_pose.position.x
     wpose.position.y = initial_pose.position.y
-    wpose.position.z = initial_pose.position.z + 0.15
+    wpose.position.z = initial_pose.position.z + distance
     wpose.orientation = copy.deepcopy(initial_pose.orientation)
     waypoints.append(copy.deepcopy(wpose))
 

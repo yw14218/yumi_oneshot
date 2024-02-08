@@ -40,108 +40,100 @@ def cartesian(): # works!
     eef_link = yumi.group_r.get_end_effector_link()
     print("============ Right End effector: {0}".format(eef_link))
 
+
+def remove_duplicate_time_points(plan):
+    new_points = []
+    last_time_from_start = None
+    for point in plan.joint_trajectory.points:
+        if last_time_from_start is None or point.time_from_start != last_time_from_start:
+            new_points.append(point)
+            last_time_from_start = point.time_from_start
+    plan.joint_trajectory.points = new_points
+    return plan
+
 def run():
 
-    with open("yumi_joint_states.json") as f:
+    with open("split_lego_both.json") as f:
         joint_states = json.load(f)
     filtered_joint_states = filter_joint_states(joint_states, 0.1)
 
     msgs = [dict_to_joint_state(filtered_joint_state) for filtered_joint_state in filtered_joint_states]
     rospy.loginfo(type(msgs[0]))
-    print(len(msgs))
-    gfk = GetFK('gripper_l_base', 'world')
-    eef_poses = [gfk.get_fk(msg) for msg in msgs]
-    assert len(eef_poses) == len(msgs), "error in computing FK"
-    print(len(eef_poses))
 
-    # yumi.go_to_joints(smoothed_data[-1], yumi.LEFT)
+    gfk_left = GetFK('gripper_l_base', 'world')
+    eef_poses_left = [gfk_left.get_fk(msg) for msg in msgs]
 
-    # for positions in smoothed_data:
-    #     yumi.go_to_joints(positions, yumi.LEFT)
-    waypoints = [eef_pose.pose_stamped[0].pose for eef_pose in eef_poses]
-    waypoint_nums = [[waypoint.position.x, waypoint.position.y, waypoint.position.z, 
-                        waypoint.orientation.x, waypoint.orientation.y, waypoint.orientation.z, 
-                        waypoint.orientation.w] for waypoint in waypoints]
+
+    gfk_right = GetFK('gripper_r_base', 'world')
+    eef_poses_right = [gfk_right.get_fk(msg) for msg in msgs]
+
+    assert len(eef_poses_left) == len(msgs), "error in computing FK"
+    assert len(eef_poses_right) == len(msgs), "error in computing FK"
     
-    delta_R = np.array([
-        [0.98628563,  0.16504762,  0.,          0.07052299],
-        [-0.16504762, 0.98628563,  0.,          0.0126316 ],
-        [0.,          0.,          1.,         -0.00986874],
-        [0.,          0.,          0.,          1.        ]
-    ])
+    waypoints_left = [eef_pose.pose_stamped[0].pose for eef_pose in eef_poses_left]
+    waypoints_right = [eef_pose.pose_stamped[0].pose for eef_pose in eef_poses_right]
+
+    split_index = int(len(waypoints_left) * 0.6)
+
+    yumi.go_to_joints(waypoints_left[0], yumi.LEFT)
+    yumi.go_to_joints(waypoints_right[split_index], yumi.RIGHT)
+
+    # for waypoint_right in waypoints_right:
+    #     yumi.group_r.set_pose_target(waypoint_right)
+    #     plan = yumi.group_r.plan()
+    #     yumi.group_r.go(wait=True)
 
 
-    transformed_waypoints = []
-    # Apply the transformation to each waypoint
-    for waypoint in waypoint_nums:
-        waypoint_translation = waypoint[:3]
-        waypoint_rotation = R.from_quat(waypoint[3:7]).as_matrix()
-
-        RW = np.eye(4)
-        RW[:3, :3] = waypoint_rotation
-        RW[:3, 3] = waypoint_translation
-
-        # Apply the composite transformation
-        transformed_matrix = delta_R @ RW
-        transformed_translation = translation_from_matrix(transformed_matrix)
-        transformed_quaternion = quaternion_from_matrix(transformed_matrix)
-
-        transformed_waypoints.append(np.concatenate((transformed_translation, transformed_quaternion)).tolist())
-
-    new_waypoints = [yumi.create_pose(*waypoint) for waypoint in transformed_waypoints]
-    print(new_waypoints)
-
-    (plan, fraction) = yumi.group_l.compute_cartesian_path(
-                                new_waypoints,   # waypoints to follow
-                                0.01,        # eef_step
-                                0.0)         # jump_threshold
+    # (plan, fraction) = yumi.group_l.compute_cartesian_path(
+    #                             waypoints_left[1:],   # waypoints to follow
+    #                             0.01,        # eef_step
+    #                             0.0)         # jump_threshold
 
     # if (fraction == 1.0):
-    #     plan = yumi.group_l.retime_trajectory(yumi.robot.get_current_state(), plan, 0.05, 0.05)
+    #     plan = yumi.group_l.retime_trajectory(yumi.robot.get_current_state(), plan, 0.2, 0.2)
+    #     plan = remove_duplicate_time_points(plan)
 
-    rospy.loginfo("Displaying trajectories")
-    # Initialize the display_trajectory_publisher
-    display_trajectory_publisher = rospy.Publisher('/move_group/display_planned_path',
-                                               moveit_msgs.msg.DisplayTrajectory,
-                                               queue_size=20)
-    display_trajectory = moveit_msgs.msg.DisplayTrajectory()
-    display_trajectory.trajectory_start = yumi.robot.get_current_state()
-    display_trajectory.trajectory.append(plan)
-    # Publish
-    display_trajectory_publisher.publish(display_trajectory)
+    # rospy.loginfo("Displaying trajectories")
+    # # Initialize the display_trajectory_publisher
+    # display_trajectory_publisher = rospy.Publisher('/move_group/display_planned_path',
+    #                                            moveit_msgs.msg.DisplayTrajectory,
+    #                                            queue_size=20)
+    # display_trajectory = moveit_msgs.msg.DisplayTrajectory()
+    # display_trajectory.trajectory_start = yumi.robot.get_current_state()
+    # display_trajectory.trajectory.append(plan)
+    # # Publish
+    # display_trajectory_publisher.publish(display_trajectory)
 
-    print(plan)
-    yumi.group_l.execute(plan, wait=True)
-    rospy.sleep(1)
-    yumi.gripper_effort(yumi.LEFT, 15)
+    # yumi.group_l.execute(plan, wait=True)
 
-    waypoints = []
+    # rospy.sleep(1)
+    # yumi.gripper_effort(yumi.LEFT, 20)
+    # yumi.gripper_effort(yumi.RIGHT, -20)
 
-    waypoints.append(yumi.group_l.get_current_pose().pose)
+    # # Compute the cartesian path
+    # (plan, fraction) = yumi.group_r.compute_cartesian_path(
+    #     waypoints_right[split_index:],  # waypoints to follow
+    #     0.01,              # eef_step
+    #     0.0)               # jump_threshold
 
-    # first orient gripper and move forward (+x)
-    wpose = geometry_msgs.msg.Pose()
-    wpose.position.x = waypoints[0].position.x
-    wpose.position.y = waypoints[0].position.y  
-    wpose.position.z = waypoints[0].position.z + 0.2
-    wpose.orientation.x = waypoints[0].orientation.x
-    wpose.orientation.y = waypoints[0].orientation.y
-    wpose.orientation.z = waypoints[0].orientation.z
-    wpose.orientation.w = waypoints[0].orientation.w
-    waypoints.append(copy.deepcopy(wpose))
+    # # If the path computation was successful, retime and modify the trajectory
+    # if fraction == 1.0:
+    #     plan = yumi.group_r.retime_trajectory(yumi.robot.get_current_state(), plan, 0.2, 0.2)
+    #     plan = remove_duplicate_time_points(plan)
 
-    del waypoints[0]
-    # print(waypoints)
-    (plan, fraction) = yumi.group_l.compute_cartesian_path(
-                                waypoints,   # waypoints to follow
-                                0.01,        # eef_step
-                                0.0)         # jump_threshold
-    # print(plan)
-    if (fraction == 1.0):
-        plan = yumi.group_l.retime_trajectory(yumi.robot.get_current_state(), plan, 0.05, 0.05)
-    yumi.group_l.execute(plan, wait=True)
 
-    rospy.sleep(1)
+    # rospy.loginfo("Displaying trajectories")
+    # # Initialize the display_trajectory_publisher
+    # display_trajectory_publisher = rospy.Publisher('/move_group/display_planned_path',
+    #                                            moveit_msgs.msg.DisplayTrajectory,
+    #                                            queue_size=20)
+    # display_trajectory = moveit_msgs.msg.DisplayTrajectory()
+    # display_trajectory.trajectory_start = yumi.robot.get_current_state()
+    # display_trajectory.trajectory.append(plan)
+    # # Publish
+    # display_trajectory_publisher.publish(display_trajectory)
+
+    # yumi.group_r.execute(plan, wait=True)
 
 def dict_to_joint_state(data):
     """
