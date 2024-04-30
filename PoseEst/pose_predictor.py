@@ -75,9 +75,8 @@ class PosePredictor(nn.Module):
     def forward(self, data: SceneData):
         data.update(self.preprocessor(data))
         predicted_rot = self.rot_model(data)
-        print(f"After {np.random.randint(100)}")
-        R_mtx, rotated_pcd0 = self.rotate_pointcloud(data["pointcloud_0"], predicted_rot)
-        translation = self.find_translation(rotated_pcd0, data["pointcloud_1"])
+        R_mtx, rotated_pcd0 = self.rotate_pointcloud(data["pc0"], predicted_rot)
+        translation = self.find_translation(rotated_pcd0, data["pc1"])
         T_delta_base = np.eye(4)
         T_delta_base[:3, :3] = R_mtx
         T_delta_base[:3, 3] = translation
@@ -91,41 +90,24 @@ if __name__ == "__main__":
     from PIL import Image
     import open3d as o3d
 
-    T_WC = np.load("../handeye/T_WC_head.npy")
+    T_WC = np.load("handeye/T_WC_head.npy")
+    intrinsics = np.load("handeye/intrinsics_d415.npy")
 
-    # demon_rgb = Image.open("../data/lego/demo_clipped_image.png")
-    # demon_depth = Image.open("../data/lego/demo_clipped_depth.png")
-    # demon_mask = Image.open("../data/lego/demo_clipped_mask.png")
-    # live_rgb = Image.open("../data/lego/live_clipped_image.png")
-    # live_depth = Image.open("../data/lego/live_clipped_depth.png")
-    # live_mask = Image.open("../data/lego/live_clipped_mask.png")
+    demon_rgb = Image.open("data/lego/demo_rgb.png")
+    demon_depth = Image.open("data/lego/demo_depth.png")
+    demon_mask = Image.open("data/lego/demo_mask.png")
+    live_rgb = Image.open("data/lego/live_rgb.png")
+    live_depth = Image.open("data/lego/live_depth.png")
+    live_mask = Image.open("data/lego/live_mask.png")
 
-    # demon_rgb = Image.open("../data/lego/original/demo_rgb.png")
-    # demon_depth = Image.open("../data/lego/original/demo_depth.png")
-    # demon_mask = Image.open("../data/lego/original/demo_mask.png")
+    demon_rgb_array = np.array(demon_rgb)
+    demon_depth_array = np.array(demon_depth)
+    demon_mask_array = np.array(demon_mask)
 
-    live_rgb = Image.open("../data/live_spray_rgb.png")
-    live_depth = Image.open("../data/live_spray_depth.png")
-    live_mask = Image.open("../data/live_spray_mask.png")
-
-    intrinsics = np.load("../handeye/intrinsics.npy").reshape(3, 3)
-
-    # demon_rgb_array = np.array(demon_rgb)
-    # demon_depth_array = np.array(demon_depth)
-    # demon_mask_array = np.array(demon_mask)
-
-    # live_rgb_array = np.array(live_rgb)
-    # live_depth_array = np.array(live_depth)
-    # live_mask_array = np.array(live_mask)
-
-    # np.save("live_rgb_array.npy", live_rgb_array)
-    # np.save("live_depth_array.npy", live_depth_array)
-    # np.save("live_mask_array.npy", live_mask_array)
+    live_rgb_array = np.array(live_rgb)
+    live_depth_array = np.array(live_depth)
+    live_mask_array = np.array(live_mask)
     
-
-    live_rgb_array = np.load("live_rgb_array.npy")
-    live_depth_array = np.load("live_depth_array.npy")
-    live_mask_array = np.load("live_mask_array.npy")
 
     # np.random.seed(10)
     # torch.random.manual_seed(10)
@@ -141,29 +123,25 @@ if __name__ == "__main__":
         seg_1=live_mask_array,
         intrinsics_0=intrinsics,
         intrinsics_1=intrinsics,
-        T_WC=T_WC
+        T_WC=np.eye(4)
     )
 
     pose_predictor = PosePredictor()
 
-    # # np.random.seed(10)
-    # print(np.random.random_integers(100))
     T_delta_base, T_delta_cam = pose_predictor.forward(data)
 
-    # print(T_delta_base)
-    # print(T_delta_cam)
-
-    # # new T_eef = T_delta_base @ T_eef
+    print(T_delta_base)
+    print(T_delta_cam)
 
     import copy
 
-    # def draw_registration_result(source, target, transformation):
-    #     source.transform(transformation)
-    #     source_temp = copy.deepcopy(source)
-    #     target_temp = copy.deepcopy(target)
-    #     source_temp.paint_uniform_color([1, 0.706, 0])
-    #     target_temp.paint_uniform_color([0, 0.651, 0.929])
-    #     o3d.visualization.draw_geometries([source_temp, target_temp])
+    def draw_registration_result(source, target, transformation):
+        source.transform(transformation)
+        source_temp = copy.deepcopy(source)
+        target_temp = copy.deepcopy(target)
+        source_temp.paint_uniform_color([1, 0.706, 0])
+        target_temp.paint_uniform_color([0, 0.651, 0.929])
+        o3d.visualization.draw_geometries([source_temp, target_temp])
 
     pcd0 = o3d.geometry.PointCloud()
     pcd1 = o3d.geometry.PointCloud()
@@ -171,7 +149,7 @@ if __name__ == "__main__":
     pcd0.points = o3d.utility.Vector3dVector(data["pc0"][:, :3])
     pcd1.points = o3d.utility.Vector3dVector(data["pc1"][:, :3])
     
-    # draw_registration_result(source=pcd0, target=pcd1, transformation=T_delta_base)
+    draw_registration_result(source=pcd0, target=pcd1, transformation=T_delta_base)
 
     # # Extracting rotation matrix and translation vector
     # rotation_matrix = T_delta_base[:3, :3]
@@ -195,30 +173,30 @@ if __name__ == "__main__":
         o3d.visualization.draw_geometries([source_temp, target_temp])
 
 
-    # ICP registration
-    threshold = 0.02  # Set a threshold for ICP, this depends on your data
-    trans_init = np.identity(4)  # Initial transformation
+    # # ICP registration
+    # threshold = 0.02  # Set a threshold for ICP, this depends on your data
+    # trans_init = np.identity(4)  # Initial transformation
 
-    # Apply ICP
-    reg_p2p = o3d.pipelines.registration.registration_icp(
-        pcd0, pcd1, threshold, trans_init,
-        o3d.pipelines.registration.TransformationEstimationPointToPoint())
+    # # Apply ICP
+    # reg_p2p = o3d.pipelines.registration.registration_icp(
+    #     pcd0, pcd1, threshold, trans_init,
+    #     o3d.pipelines.registration.TransformationEstimationPointToPoint())
 
-    # Get the transformation matrix
-    T_delta_icp = reg_p2p.transformation
+    # # Get the transformation matrix
+    # T_delta_icp = reg_p2p.transformation
 
 
-    # Extracting rotation matrix and translation vector
-    rotation_matrix = T_delta_icp[:3, :3]
-    translation_vector = T_delta_icp[:3, 3]
+    # # Extracting rotation matrix and translation vector
+    # rotation_matrix = T_delta_icp[:3, :3]
+    # translation_vector = T_delta_icp[:3, 3]
 
-    rvec, _ = cv2.Rodrigues(rotation_matrix)
-    rotation_error = np.linalg.norm(rvec) * 180 / np.pi
+    # rvec, _ = cv2.Rodrigues(rotation_matrix)
+    # rotation_error = np.linalg.norm(rvec) * 180 / np.pi
 
-    # Calculating translation error
-    translation_error = np.linalg.norm(translation_vector)
+    # # Calculating translation error
+    # translation_error = np.linalg.norm(translation_vector)
 
-    print(rotation_error, translation_error)
+    # print(rotation_error, translation_error)
 
-    # Draw the result
-    draw_registration_result(pcd0, pcd1, T_delta_icp)
+    # # Draw the result
+    # draw_registration_result(pcd0, pcd1, T_delta_icp)

@@ -15,7 +15,7 @@ from collect_left_arm_demo import dict_to_ros_pose
 def load_grasp_pose():
 
     gfk_left = GetFK('gripper_l_base', 'world')
-    file_name="data/split_lego/left.json"
+    file_name="data/wood/left_demo_poses.json"
 
     with open(file_name) as f:
         joint_states = json.load(f)
@@ -25,7 +25,7 @@ def load_grasp_pose():
     return gfk_left.get_fk(msg).pose_stamped[0].pose 
 
 def load_left_demo_poses():
-    file_name="data/lego_split/left_demo_poses.json"
+    file_name="data/wood/left_demo_poses.json"
 
     with open(file_name) as f:
         poses = json.load(f)
@@ -52,7 +52,8 @@ def run():
     while True:
         yumi.reset_init()
 
-        T_delta_world = pose_estimator.run(output_path="data/lego_split/")
+        # T_delta_world = pose_estimator.run(output_path="data/lego_split/")
+        T_delta_world = np.eye(4)
 
         # Planning and executing transferred trajectories
         waypoints = [bottle_neck_pose]
@@ -70,11 +71,11 @@ def run():
         rospy.sleep(2)
 
         # Additional movement planning
-        yumi.gripper_effort(yumi.LEFT, 20)
+        # yumi.gripper_effort(yumi.LEFT, 20)
 
-        yumi.group_l.set_pose_target(bottle_neck_poses["end"])
-        plan = yumi.group_l.plan()
-        yumi.group_l.go(wait=True)
+        # yumi.group_l.set_pose_target(bottle_neck_poses["end"])
+        # plan = yumi.group_l.plan()
+        # yumi.group_l.go(wait=True)
 
 
         # User input to continue or break the loop

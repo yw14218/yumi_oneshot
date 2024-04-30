@@ -88,6 +88,6 @@ class JointStatePublisher:
         return joint_traj
 
 if __name__ == '__main__':
-    input_file = "data/split_lego/left.json"  # Ensure correct path
+    input_file = "data/wood/left_demo_poses.json"  # Ensure correct path
     joint_state_publisher = JointStatePublisher(input_file)
     joint_state_publisher.publish_joint_states()

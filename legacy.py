@@ -86,7 +86,34 @@ def run():
     print(right)
 
 
-    # yumi.reset_init()
+    yumi.reset_init()
+
+    yumi.group_l.set_pose_target([
+        0.40478858783062377,
+        0.0822375992134779,
+        0.5579262664335177,
+        -0.9996890672397254,
+        0.001056533957927872,
+        0.020941860640910196,
+        0.01349411168845638
+    ])
+
+    plan = yumi.group_l.plan()
+    yumi.group_l.go(wait=True)
+
+    # yumi.group_r.set_pose_target([
+    #     0.5329431807214543,
+    #     -0.23440120550837626,
+    #     0.46487699496824025,
+    #     -0.9805945676315453,
+    #     -0.04030389996510242,
+    #     -0.01228235877075307,
+    #     0.19146548838402241
+    # ])
+
+    # plan = yumi.group_r.plan()
+    # yumi.group_r.go(wait=True)
+
     # # Drive YuMi end effectors to a desired position (pose_ee), and perform a grasping task with a given effort (grip_effort)
     # # Gripper effort: opening if negative, closing if positive, static if zero
 
