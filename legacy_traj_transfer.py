@@ -53,7 +53,7 @@ def remove_duplicate_time_points(plan):
 
 def run():
 
-    with open("split_lego_both.json") as f:
+    with open("data/split_lego/lift_and_mop_table_both.json") as f:
         joint_states = json.load(f)
     filtered_joint_states = filter_joint_states(joint_states, 0.1)
 
@@ -73,67 +73,68 @@ def run():
     waypoints_left = [eef_pose.pose_stamped[0].pose for eef_pose in eef_poses_left]
     waypoints_right = [eef_pose.pose_stamped[0].pose for eef_pose in eef_poses_right]
 
-    split_index = int(len(waypoints_left) * 0.6)
+    split_index = int(len(waypoints_right) * 0.5)
 
-    yumi.go_to_joints(waypoints_left[0], yumi.LEFT)
+    yumi.go_to_joints(waypoints_left[split_index], yumi.LEFT)
     yumi.go_to_joints(waypoints_right[split_index], yumi.RIGHT)
 
-    # for waypoint_right in waypoints_right:
+
+    (plan, fraction) = yumi.group_l.compute_cartesian_path(
+                                waypoints_left[1:],   # waypoints to follow
+                                0.01,        # eef_step
+                                0.0)         # jump_threshold
+
+    if (fraction == 1.0):
+        plan = yumi.group_l.retime_trajectory(yumi.robot.get_current_state(), plan, 0.2, 0.2)
+        plan = remove_duplicate_time_points(plan)
+
+    rospy.loginfo("Displaying trajectories")
+    # Initialize the display_trajectory_publisher
+    display_trajectory_publisher = rospy.Publisher('/move_group/display_planned_path',
+                                               moveit_msgs.msg.DisplayTrajectory,
+                                               queue_size=20)
+    display_trajectory = moveit_msgs.msg.DisplayTrajectory()
+    display_trajectory.trajectory_start = yumi.robot.get_current_state()
+    display_trajectory.trajectory.append(plan)
+    # Publish
+    display_trajectory_publisher.publish(display_trajectory)
+
+    yumi.group_l.execute(plan, wait=True)
+
+
+    # for waypoint_right in waypoints_right[split_index:]:
     #     yumi.group_r.set_pose_target(waypoint_right)
     #     plan = yumi.group_r.plan()
     #     yumi.group_r.go(wait=True)
-
-
-    # (plan, fraction) = yumi.group_l.compute_cartesian_path(
-    #                             waypoints_left[1:],   # waypoints to follow
-    #                             0.01,        # eef_step
-    #                             0.0)         # jump_threshold
-
-    # if (fraction == 1.0):
-    #     plan = yumi.group_l.retime_trajectory(yumi.robot.get_current_state(), plan, 0.2, 0.2)
-    #     plan = remove_duplicate_time_points(plan)
-
-    # rospy.loginfo("Displaying trajectories")
-    # # Initialize the display_trajectory_publisher
-    # display_trajectory_publisher = rospy.Publisher('/move_group/display_planned_path',
-    #                                            moveit_msgs.msg.DisplayTrajectory,
-    #                                            queue_size=20)
-    # display_trajectory = moveit_msgs.msg.DisplayTrajectory()
-    # display_trajectory.trajectory_start = yumi.robot.get_current_state()
-    # display_trajectory.trajectory.append(plan)
-    # # Publish
-    # display_trajectory_publisher.publish(display_trajectory)
-
-    # yumi.group_l.execute(plan, wait=True)
 
     # rospy.sleep(1)
     # yumi.gripper_effort(yumi.LEFT, 20)
     # yumi.gripper_effort(yumi.RIGHT, -20)
 
-    # # Compute the cartesian path
-    # (plan, fraction) = yumi.group_r.compute_cartesian_path(
-    #     waypoints_right[split_index:],  # waypoints to follow
-    #     0.01,              # eef_step
-    #     0.0)               # jump_threshold
+    # Compute the cartesian path
+    (plan, fraction) = yumi.group_r.compute_cartesian_path(
+        waypoints_right[split_index:],  # waypoints to follow
+        0.01,              # eef_step
+        0.0)               # jump_threshold
 
-    # # If the path computation was successful, retime and modify the trajectory
-    # if fraction == 1.0:
-    #     plan = yumi.group_r.retime_trajectory(yumi.robot.get_current_state(), plan, 0.2, 0.2)
-    #     plan = remove_duplicate_time_points(plan)
+    # If the path computation was successful, retime and modify the trajectory
+    if fraction == 1.0:
+        plan = yumi.group_r.retime_trajectory(yumi.robot.get_current_state(), plan, 0.5, 0.5)
+        plan = remove_duplicate_time_points(plan)
 
 
-    # rospy.loginfo("Displaying trajectories")
-    # # Initialize the display_trajectory_publisher
-    # display_trajectory_publisher = rospy.Publisher('/move_group/display_planned_path',
-    #                                            moveit_msgs.msg.DisplayTrajectory,
-    #                                            queue_size=20)
-    # display_trajectory = moveit_msgs.msg.DisplayTrajectory()
-    # display_trajectory.trajectory_start = yumi.robot.get_current_state()
-    # display_trajectory.trajectory.append(plan)
-    # # Publish
-    # display_trajectory_publisher.publish(display_trajectory)
+    rospy.loginfo("Displaying trajectories")
+    # Initialize the display_trajectory_publisher
+    display_trajectory_publisher = rospy.Publisher('/move_group/display_planned_path',
+                                               moveit_msgs.msg.DisplayTrajectory,
+                                               queue_size=20)
+    display_trajectory = moveit_msgs.msg.DisplayTrajectory()
+    display_trajectory.trajectory_start = yumi.robot.get_current_state()
+    display_trajectory.trajectory.append(plan)
+    # Publish
+    display_trajectory_publisher.publish(display_trajectory)
 
-    # yumi.group_r.execute(plan, wait=True)
+    yumi.group_r.execute(plan, wait=True)
 
 def dict_to_joint_state(data):
     """

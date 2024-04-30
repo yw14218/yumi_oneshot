@@ -1,16 +1,25 @@
 .PHONY: launch_camera launch_handeye launch_yumi launch_moveit stop all
 
 all: launch_camera launch_handeye launch_yumi launch_moveit
+
 camera:
-	@$(MAKE) launch_camera &
-	@$(MAKE) launch_handeye
+	@$(MAKE) launch_camera
 
 yumi: launch_yumi
+
 moveit: launch_moveit
+
+bridge:launch_bridge
+
+launch_bridge:
+	@echo "Launching ROS1 Bridge..."
+	@bash -c "source /opt/ros/foxy/setup.bash && ros2 run ros1_bridge dynamic_bridge --bridge-all-topics"
 
 launch_camera:
 	@echo "Launching RealSense Camera..."
-	@roslaunch realsense2_camera rs_camera.launch align_depth:=true filters:=pointcloud &
+	@bash -c "source /opt/ros/foxy/setup.bash && source /opt/ros/foxy/local_setup.bash && \
+	 (ros2 launch realsense2_camera rs_launch.py align_depth.enable:=true device_type:=d405 camera_name:=d405 &) && \
+	 (ros2 launch realsense2_camera rs_launch.py align_depth.enable:=true device_type:=d415 camera_name:=d415)"
 
 launch_handeye:
 	@echo "Launching Yumi Handeye Calibration..."
@@ -29,5 +38,10 @@ launch_moveit:
 
 stop:
 	@echo "Stopping all ROS nodes..."
-	@killall -q roslaunch || true
-	@killall -q rosmaster || true
+	@pkill -f ros
+
+
+# source /opt/ros/foxy/setup.bash && ros2 run ros1_bridge dynamic_bridge --bridge-all-topics
+# ros2 launch realsense2_camera rs_multi_camera_launch.py camera_name1:=D415 camera_name2:=D405 device_type1:=d415 device_type2:=d405 pointcloud.enable:=true
+# ros2 launch realsense2_camera rs_launch.py align_depth.enable:=true device_type:=d405 camera_name:=d405
+# ros2 launch realsense2_camera rs_launch.py align_depth.enable:=true device_type:=d415 camera_name:=d415
