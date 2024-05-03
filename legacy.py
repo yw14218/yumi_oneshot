@@ -13,34 +13,6 @@ from std_srvs.srv import Empty
 
 
 
-def close_grippers(arm):
-    """Closes the grippers.
-
-    Closes the grippers with an effort of 15 and then relaxes the effort to 0.
-
-    :param arm: The side to be closed (moveit_utils LEFT or RIGHT)
-    :type arm: int
-    :returns: Nothing
-    :rtype: None
-    """
-    yumi.gripper_effort(arm, 15.0)
-    yumi.gripper_effort(arm, 0.0)
-
-def open_grippers(arm):
-    """Opens the grippers.
-
-    Opens the grippers with an effort of -15 and then relaxes the effort to 0.
-
-    :param arm: The side to be opened (moveit_utils LEFT or RIGHT)
-    :type arm: int
-    :returns: Nothing
-    :rtype: None
-    """
-    yumi.gripper_effort(arm, -15.0)
-    yumi.gripper_effort(arm, 0.0)
-
-
-
 def move_and_grasp(arm, pose_ee, grip_effort):
     try:
         yumi.traverse_path([pose_ee], arm, 10)
@@ -80,26 +52,23 @@ def run():
 
     left = yumi.get_current_pose(yumi.LEFT)
     right = yumi.get_current_pose(yumi.RIGHT)
-
-
     print(left)
-    print(right)
+    # print(right)
 
+    import threading
+    # yumi.reset_init()
 
-    yumi.reset_init()
+    # yumi.group_l.set_pose_target([
+    #     0.40478858783062377,
+    #     0.0822375992134779,
+    #     0.5579262664335177,
+    #     -0.9996890672397254,
+    #     0.001056533957927872,
+    #     0.020941860640910196,
+    #     0.01349411168845638
+    # ])
 
-    yumi.group_l.set_pose_target([
-        0.40478858783062377,
-        0.0822375992134779,
-        0.5579262664335177,
-        -0.9996890672397254,
-        0.001056533957927872,
-        0.020941860640910196,
-        0.01349411168845638
-    ])
-
-    plan = yumi.group_l.plan()
-    yumi.group_l.go(wait=True)
+    # plan = yumi.group_l.plan()
 
     # yumi.group_r.set_pose_target([
     #     0.5329431807214543,
@@ -112,7 +81,25 @@ def run():
     # ])
 
     # plan = yumi.group_r.plan()
+
     # yumi.group_r.go(wait=True)
+
+
+    # def execute_trajectory(arm):
+    #     # Assuming yumi.gripper_effort is a valid function call
+    #     yumi.gripper_effort(arm, 15.0)
+
+    # # Create threads, passing the function and its arguments correctly
+    # thread_left = threading.Thread(target=execute_trajectory, args=(yumi.LEFT,))
+    # thread_right = threading.Thread(target=execute_trajectory, args=(yumi.RIGHT,))
+
+    # # Start threads
+    # thread_left.start()
+    # thread_right.start()
+
+    # # Join threads to ensure both commands complete
+    # thread_left.join()
+    # thread_right.join()
 
     # # Drive YuMi end effectors to a desired position (pose_ee), and perform a grasping task with a given effort (grip_effort)
     # # Gripper effort: opening if negative, closing if positive, static if zero
@@ -128,7 +115,7 @@ def run():
 
     # Print current joint angles
     # yumi.print_current_joint_states(yumi.RIGHT)
-    yumi.print_current_joint_states(yumi.LEFT)
+    # yumi.print_current_joint_states(yumi.LEFT)
     
     rospy.spin()
 

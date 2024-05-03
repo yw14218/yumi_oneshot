@@ -1,6 +1,6 @@
 .PHONY: launch_camera launch_handeye launch_yumi launch_moveit stop all
 
-all: launch_camera launch_handeye launch_yumi launch_moveit
+all: launch_camera launch_yumi launch_moveit
 
 camera:
 	@$(MAKE) launch_camera
@@ -21,10 +21,16 @@ launch_camera:
 	 (ros2 launch realsense2_camera rs_launch.py align_depth.enable:=true device_type:=d405 camera_name:=d405 &) && \
 	 (ros2 launch realsense2_camera rs_launch.py align_depth.enable:=true device_type:=d415 camera_name:=d415)"
 
-launch_handeye:
-	@echo "Launching Yumi Handeye Calibration..."
-	@sleep 1 # Wait for the camera to initialize
-	@bash -c "roslaunch handeye/handeye.launch"
+launch_d415:
+	@echo "Launching RealSense Camera..."
+	@bash -c "source /opt/ros/foxy/setup.bash && source /opt/ros/foxy/local_setup.bash && \
+	 (ros2 launch realsense2_camera rs_launch.py align_depth.enable:=true device_type:=d415 camera_name:=d415)"
+
+launch_d405:
+	@echo "Launching RealSense Camera..."
+	@bash -c "source /opt/ros/foxy/setup.bash && source /opt/ros/foxy/local_setup.bash && \
+	 (ros2 launch realsense2_camera rs_launch.py align_depth.enable:=true device_type:=d405 camera_name:=d405)"
+
 
 launch_yumi:
 	@echo "Setting network configuration for Yumi..."
