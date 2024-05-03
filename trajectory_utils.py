@@ -1,6 +1,9 @@
+import copy
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation as R
+from moveit_commander import RobotTrajectory
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 def filter_joint_states(joint_states, threshold):
     """
@@ -52,13 +55,6 @@ def quaternion_from_matrix(matrix):
 def apply_transformation_to_waypoints(waypoints_np, delta_R):
     """
     Apply a transformation to a list of end-effector poses using NumPy vectorization.
-
-    Parameters:
-    eef_poses (list): List of end-effector ROS pose_stamped.
-    delta_R (numpy.ndarray): 4x4 transformation matrix.
-
-    Returns:
-    list: Transformed waypoints.
     """
 
     # Separate translations and rotations
@@ -85,3 +81,90 @@ def apply_transformation_to_waypoints(waypoints_np, delta_R):
     transformed_waypoints = np.hstack((transformed_translations, transformed_rotations))
 
     return transformed_waypoints.tolist()
+
+def align_trajectories(plan1, plan2):
+    """
+    Aligns the durations of two trajectories to have the same number of points by stretching 
+    the timeline of the shorter trajectory.
+
+    This function modifies the shorter trajectory by increasing its time_from_start for each point,
+    distributing the points evenly over the duration of the longer trajectory. It ensures that both
+    trajectories will have points that correspond in time, facilitating synchronization of execution.
+
+    Parameters:
+    - plan1 (RobotTrajectory): The first trajectory plan, assumed to be equal to or longer than plan2.
+    - plan2 (RobotTrajectory): The second trajectory plan, assumed to be shorter or equal to plan1.
+
+    Returns:
+    - None: The function modifies plan2 in place; it does not return a value.
+
+    Note:
+    If plan2 is longer than plan1, the function will recursively call itself with swapped arguments.
+
+    Example:
+    - If plan1 has 10 points spread over 10 seconds and plan2 has 5 points spread over 5 seconds,
+      plan2's points will be adjusted to be 2 seconds apart, matching the 10-second span.
+
+    Raises:
+    - This function assumes that both plan1 and plan2 are valid RobotTrajectory objects and that
+      they have been properly initialized with joint_trajectory data. It will not work correctly
+      if these conditions are not met.
+    """
+
+    # Assuming plan1 is longer or equal to plan2
+    if len(plan1.joint_trajectory.points) > len(plan2.joint_trajectory.points):
+        scale_factor = len(plan1.joint_trajectory.points) / len(plan2.joint_trajectory.points)
+        new_points = []
+        for point in plan2.joint_trajectory.points:
+            new_point = copy.deepcopy(point)
+            new_point.time_from_start *= scale_factor
+            new_points.append(new_point)
+        plan2.joint_trajectory.points = new_points
+    elif len(plan1.joint_trajectory.points) < len(plan2.joint_trajectory.points):
+        align_trajectories(plan2, plan1)  # Swap roles
+
+
+def merge_trajectories(plan_left, plan_right):
+    """
+    Merges two robotic arm trajectory plans into a single plan by combining their joint trajectory points.
+
+    This function assumes that both input plans are already aligned in terms of time and length,
+    meaning they have the same number of points and corresponding points occur at the same times.
+    It concatenates the joint names and merges the trajectory points from both plans into a single
+    trajectory, which includes positions, velocities, accelerations, and efforts.
+
+    Parameters:
+    - plan_left (RobotTrajectory): The trajectory plan for the left arm.
+    - plan_right (RobotTrajectory): The trajectory plan for the right arm.
+
+    Returns:
+    - RobotTrajectory: A new RobotTrajectory object containing the merged trajectory of both input plans.
+
+    Raises:
+    - AssertionError: If the lengths of the trajectory points of the two plans do not match.
+    
+    Example Usage:
+    Assume plan_left and plan_right are precomputed RobotTrajectory objects with aligned trajectory points:
+    merged_plan = merge_trajectories(plan_left, plan_right)
+    """
+        
+    # Create a new trajectory
+    merged_trajectory = RobotTrajectory()
+    merged_trajectory.joint_trajectory = JointTrajectory()
+
+    # Combine joint names
+    merged_trajectory.joint_trajectory.joint_names = (
+        plan_left.joint_trajectory.joint_names + plan_right.joint_trajectory.joint_names
+    )
+
+    # Assuming both plans are now aligned in time and length
+    for p1, p2 in zip(plan_left.joint_trajectory.points, plan_right.joint_trajectory.points):
+        new_point = JointTrajectoryPoint()
+        new_point.positions = p1.positions + p2.positions
+        new_point.velocities = p1.velocities + p2.velocities if p1.velocities and p2.velocities else []
+        new_point.accelerations = p1.accelerations + p2.accelerations if p1.accelerations and p2.accelerations else []
+        new_point.effort = p1.effort + p2.effort if p1.effort and p2.effort else []
+        new_point.time_from_start = p1.time_from_start
+        merged_trajectory.joint_trajectory.points.append(new_point)
+
+    return merged_trajectory

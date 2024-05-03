@@ -5,20 +5,22 @@ import copy
 import rospy
 import tf
 import moveit_commander
-from moveit_commander import *
 import moveit_msgs.msg
 import geometry_msgs.msg
 import std_msgs.msg
-from yumi_hw.srv import *
 import tf2_ros
-from geometry_msgs.msg import Pose, Quaternion, TransformStamped, Vector3
+import threading
+from yumi_hw.srv import *
+from moveit_commander import *
+from geometry_msgs.msg import TransformStamped
+
 
 LEFT = 2        #:ID of the left arm
 RIGHT = 1       #:ID of the right arm
 BOTH = 3        #:ID of both_arms
 PI = 3.1415926  #:Value of PI
 
-table_height = 0.1 #:The height of the upper surface of the table
+table_height = 0.09 #:The height of the upper surface of the table
 table_distance_x = 0.74
 
 global group_l  #:The move group for the left arm
@@ -33,7 +35,6 @@ global display_trajectory_publisher
 # Current pose reference frame for group_l: world
 # ============ Left End effector: gripper_l_base ============ 
 # ============ Right End effector: gripper_r_base ============ 
-
 
 
 #Initializes the package to interface with MoveIt!
@@ -79,7 +80,6 @@ def init_Moveit():
     # p.pose.position.z = 0.7
     # scene.add_box("part", p, (0.07, 0.01, 0.2))
 
-    
     group_l = moveit_commander.MoveGroupCommander("left_arm")
     group_l.set_planner_id("ESTkConfigDefault")
     group_l.set_pose_reference_frame("world")
@@ -103,14 +103,6 @@ def init_Moveit():
     group_both.set_goal_position_tolerance(0.005)
     group_both.set_goal_orientation_tolerance(0.005)
     group_both.set_max_velocity_scaling_factor(0.2)
-
-    # fede_both = moveit_commander.MoveGroupCommander("fede_both")
-    # fede_both.set_planner_id("ESTkConfigDefault")
-    # fede_both.set_pose_reference_frame("world")
-    # fede_both.allow_replanning(False)
-    # fede_both.set_goal_position_tolerance(0.005)
-    # fede_both.set_goal_orientation_tolerance(0.005)
-    # fede_both.set_max_velocity_scaling_factor(0.2)
 
 
     display_trajectory_publisher = rospy.Publisher('/move_group/display_planned_path', 	moveit_msgs.msg.DisplayTrajectory, queue_size=20)
@@ -595,6 +587,31 @@ def reset_pose():
     reset_arm(BOTH)
 
 
+def close_grippers(arm):
+    """Closes the grippers.
+
+    Closes the grippers with an effort of 15 and then relaxes the effort to 0.
+
+    :param arm: The side to be closed (moveit_utils LEFT or RIGHT)
+    :type arm: int
+    :returns: Nothing
+    :rtype: None
+    """
+    gripper_effort(arm, 15.0)
+    gripper_effort(arm, 0.0)
+
+def open_grippers(arm):
+    """Opens the grippers.
+
+    Opens the grippers with an effort of -15 and then relaxes the effort to 0.
+
+    :param arm: The side to be opened (moveit_utils LEFT or RIGHT)
+    :type arm: int
+    :returns: Nothing
+    :rtype: None
+    """
+    gripper_effort(arm, -15.0)
+    gripper_effort(arm, 0.0)
 
 
 # Resets both arms to calib
@@ -650,3 +667,49 @@ def static_tf_broadcast(parent_id, child_id, pose_in_list) -> None:
     static_transformStamped.transform.rotation.w = pose_in_list[6]
     br.sendTransform(static_transformStamped)
     print("TF of target link successfully sent")
+
+def plan_both_arms(left_goal, right_goal):
+    group_l.set_pose_target(left_goal)
+    group_r.set_pose_target(right_goal)
+    plan_left = group_l.plan()
+    plan_right = group_r.plan()
+    pos_left = [point.positions for point in plan_left[1].joint_trajectory.points]
+    pos_right = [point.positions for point in plan_right[1].joint_trajectory.points]
+    group_both.set_joint_value_target(pos_left[-1] + pos_right[-1])
+    group_both.go(wait=True)
+
+    group_both.stop()
+    group_l.clear_pose_targets()
+    group_r.clear_pose_targets()
+
+def close_gripper_in_threads(arms):
+    """
+    Close operations on arms in separate threads.
+    """
+    def grip(arm):
+        gripper_effort(arm, 20.0)
+        
+    threads = []
+    for arm in arms:
+        thread = threading.Thread(target=grip, args=(arm,))
+        threads.append(thread)
+        thread.start()
+    
+    for thread in threads:
+        thread.join()
+
+def close_left_open_right_in_threads(arms):
+    def grip(arm):
+        if arm == LEFT:
+            gripper_effort(arm, 20.0)
+        elif arm == RIGHT:
+            gripper_effort(arm, -20.0)
+        
+    threads = []
+    for arm in arms:
+        thread = threading.Thread(target=grip, args=(arm,))
+        threads.append(thread)
+        thread.start()
+    
+    for thread in threads:
+        thread.join()

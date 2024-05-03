@@ -32,8 +32,8 @@ class PoseEstimation:
             rospy.exceptions.ROSException: If the message is not received within the timeout.
         """
         try:
-            rgb_message = rospy.wait_for_message("camera/color/image_raw", ImageMsg, timeout=timeout)
-            depth_message = rospy.wait_for_message("/camera/aligned_depth_to_color/image_raw", ImageMsg, timeout=timeout)
+            rgb_message = rospy.wait_for_message("/d415/color/image_raw", ImageMsg, timeout=timeout)
+            depth_message = rospy.wait_for_message("/d415/aligned_depth_to_color/image_raw", ImageMsg, timeout=timeout)
         except rospy.exceptions.ROSException as e:
             rospy.logerr(f"Data acquisition timed out: {e}")
             raise
@@ -58,9 +58,9 @@ class PoseEstimation:
         mask_image = Image.fromarray((mask_np * 255).astype(np.uint8))
 
         import os
-        self.live_rgb_path = os.path.join(folder_path, "live_rgb.png")
-        self.live_depth_path = os.path.join(folder_path, "live_depth.png")
-        self.live_mask_path = os.path.join(folder_path, "live_mask.png")
+        self.live_rgb_path = os.path.join(folder_path, "live__head_rgb.png")
+        self.live_depth_path = os.path.join(folder_path, "live_head_depth.png")
+        self.live_mask_path = os.path.join(folder_path, "live_head_seg.png")
         rgb_image.save(self.live_rgb_path)
         depth_image.save(self.live_depth_path)
         mask_image.save(self.live_mask_path)
@@ -187,7 +187,7 @@ if __name__ == '__main__':
         demo_rgb_path="data/lego_split/demo_rgb.png",
         demo_depth_path="data/lego_split/demo_depth.png",
         demo_mask_path="data/lego_split/demo_mask.png",
-        intrinsics_path="handeye/intrinsics.npy",
+        intrinsics_path="handeye/intrinsics_d415.npy",
         T_WC_path="handeye/T_WC_head.npy"
     )
     try:

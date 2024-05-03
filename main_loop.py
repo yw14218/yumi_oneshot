@@ -27,7 +27,7 @@ def run(gfk_left):
         demo_rgb_path="data/lego/demo_rgb.png",
         demo_depth_path="data/lego/demo_depth.png",
         demo_mask_path="data/lego/demo_mask.png",
-        intrinsics_path="handeye/intrinsics.npy",
+        intrinsics_path="handeye/intrinsics_d415.npy",
         T_WC_path="handeye/T_WC_head.npy"
     )
 

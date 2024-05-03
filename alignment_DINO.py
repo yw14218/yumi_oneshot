@@ -83,8 +83,9 @@ layer = 9 #@param
 facet = 'key' #@param
 bin=True #@param
 thresh=0.05 #@param
-model_type='dino_vitb8' #@param
+model_type='dino_vits8' #@param
 stride=4 #@param
+
 if __name__ == '__main__':
     
  #Get rgbd from wrist camera.
