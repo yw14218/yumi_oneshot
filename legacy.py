@@ -116,7 +116,20 @@ def run():
     # Print current joint angles
     # yumi.print_current_joint_states(yumi.RIGHT)
     # yumi.print_current_joint_states(yumi.LEFT)
-    
+    back = [0.4118033296748138, 0.22378595991295266, 0.5793050897615559, 0.9934741742305934, -0.09152594162009686, 0.02502832203305602,0.06329020653785972]
+
+    p = [-0.23149050673610522, -0.07430196786188314, 0.14169564543333518, -2.96072169e-02, -2.72485617e-04, -7.42056474e-02,  9.96803321e-01]
+
+    p_world = [0.63028744, 0.01503754, 0.43909581, 0.00170821,  0.9979961 , -0.06246973,  0.00991924]
+
+    p_eef_new = [0.62040838, 0.08912966, 0.46735582, 0.99909779, -0.01761954,  0.01820735,  0.03408291]
+    # yumi.static_tf_broadcast("d405_color_optical_frame", "goal", p)
+    # yumi.static_tf_broadcast("world", "goal_world", p_world)
+    yumi.group_l.set_pose_target(p_eef_new)
+
+    plan = yumi.group_l.plan()
+    yumi.group_l.go(wait=True)
+
     rospy.spin()
 
 
