@@ -41,6 +41,16 @@ def plot_joint_trajectories(joint_trajectories, title):
     plt.grid(True)
     plt.show()
 
+def create_homogeneous_matrix(xyz, quaternion):
+    # Convert the quaternion to a rotation matrix
+    rotation_matrix = R.from_quat(quaternion).as_matrix()
+    # Create a homogeneous transformation matrix
+    T = np.eye(4)  # Start with an identity matrix
+    T[:3, :3] = rotation_matrix  # Insert the rotation matrix
+    T[:3, 3] = xyz  # Insert the translation vector
+
+    return T
+    
 def translation_from_matrix(matrix):
     """Extracts the translation vector from a 4x4 homogeneous transformation matrix."""
     return matrix[:3, 3]
@@ -51,6 +61,13 @@ def quaternion_from_matrix(matrix):
     rotation = R.from_matrix(rotation_matrix)
     return rotation.as_quat()
 
+def pose_inv(pose):
+    """Inverse a 4x4 homogeneous transformation matrix."""
+    R = pose[:3, :3]
+    T = np.eye(4)
+    T[:3, :3] = R.T
+    T[:3, 3] = - R.T @ np.ascontiguousarray(pose[:3, 3])
+    return T
 
 def apply_transformation_to_waypoints(waypoints_np, delta_R):
     """
