@@ -13,7 +13,7 @@ import threading
 from yumi_hw.srv import *
 from moveit_commander import *
 from geometry_msgs.msg import TransformStamped
-
+from trajectory_utils import create_homogeneous_matrix
 
 LEFT = 2        #:ID of the left arm
 RIGHT = 1       #:ID of the right arm
@@ -681,6 +681,19 @@ def plan_both_arms(left_goal, right_goal):
     group_both.stop()
     group_l.clear_pose_targets()
     group_r.clear_pose_targets()
+
+def plan_left_arm(goal):
+    group_l.set_pose_target(goal)
+    plan = group_l.plan()
+    group_l.go(wait=True)
+
+def get_curent_T_left():
+    cur_pos_left = get_current_pose(LEFT)
+    xyz = [cur_pos_left.pose.position.x, cur_pos_left.pose.position.y, cur_pos_left.pose.position.z]
+    quaternion = [cur_pos_left.pose.orientation.x, cur_pos_left.pose.orientation.y, cur_pos_left.pose.orientation.z, cur_pos_left.pose.orientation.w]
+    T_eef_world = create_homogeneous_matrix(xyz, quaternion)
+
+    return T_eef_world
 
 def close_gripper_in_threads(arms):
     """

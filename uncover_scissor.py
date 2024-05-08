@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 import json
+import sys
 import rospy
 import numpy as np
 import yumi_moveit_utils as yumi
 from poseEstimation import PoseEstimation
-from trajectory_utils import apply_transformation_to_waypoints, align_trajectories, merge_trajectories
+from trajectory_utils import apply_transformation_to_waypoints,align_trajectories, merge_trajectories, \
+                             create_homogeneous_matrix, pose_inv, quaternion_from_matrix
+from dinobotAlignment import DINOBotAlignment
 
-LIVE = False
 DIR = "data/scissor"
 OBJECT = "black scissor"
 
@@ -62,17 +64,17 @@ def replay(live_waypoints):
     # yumi.group_l.stop()
     # yumi.group_l.clear_pose_targets()
 
-def run(dbn, live):
+def run(dbn, MODE):
 
     keys = ["bottleneck_left", "bottleneck_right", 
             "grasp_left", "grasp_right", 
             "lift_left"]
     demo_waypoints = np.vstack([dbn[key] for key in keys])
 
-    if live == False:
+    if MODE == "REPLAY":
         replay(demo_waypoints.tolist())
 
-    else:
+    elif MODE == "HEADCAM":
         pose_estimator = PoseEstimation(
             text_prompt=OBJECT,
             demo_rgb_path=f"{DIR}/demo_head_rgb.png",
@@ -85,7 +87,6 @@ def run(dbn, live):
         while True:
             T_delta_world = pose_estimator.run(output_path=f"{DIR}/")
             live_waypoints = apply_transformation_to_waypoints(demo_waypoints, T_delta_world)
-
             replay(live_waypoints)
 
             user_input = input("Continue? (yes/no): ").lower()
@@ -94,7 +95,26 @@ def run(dbn, live):
 
             yumi.reset_init()
 
+    elif MODE == "DINOBOT":
+        dinobotAlignment = DINOBotAlignment(DIR=DIR)
+        error = 1000000
+
+        while error > dinobotAlignment.error_threshold:
+            rgb_live_path, depth_live_path = dinobotAlignment.save_rgbd()
+            t, R, error = dinobotAlignment.run(rgb_live_path, depth_live_path)
+            rospy.loginfo('Error is ' + str(error) + ', while the stopping threshold is ' + str(dinobotAlignment.error_threshold) + '. ')
+            pose_new_eef_world = dinobotAlignment.compute_new_eef_in_world(R, t, yumi.get_curent_T_left())
+            yumi.plan_left_arm(pose_new_eef_world)
+
+        T_delta_world = yumi.get_curent_T_left() @ pose_inv(demo_waypoints[0])
+        live_waypoints = apply_transformation_to_waypoints(demo_waypoints, T_delta_world)
+        replay(live_waypoints)
+
+    else: 
+        raise NotImplementedError
+
 if __name__ == '__main__':
+    MODE = sys.argv[1]
     try:
         rospy.init_node('yumi_moveit_demo')
         yumi.init_Moveit()
@@ -102,8 +122,8 @@ if __name__ == '__main__':
 
         with open(file_name) as f:
             dbn = json.load(f)
-            yumi.reset_init()
-            run(dbn, LIVE)
+            # yumi.reset_init()
+            run(dbn, MODE)
 
         rospy.spin()
     except Exception as e:
