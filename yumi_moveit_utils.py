@@ -687,6 +687,11 @@ def plan_left_arm(goal):
     plan = group_l.plan()
     group_l.go(wait=True)
 
+def plan_right_arm(goal):
+    group_r.set_pose_target(goal)
+    plan = group_r.plan()
+    group_r.go(wait=True)
+
 def get_curent_T_left():
     cur_pos_left = get_current_pose(LEFT)
     xyz = [cur_pos_left.pose.position.x, cur_pos_left.pose.position.y, cur_pos_left.pose.position.z]

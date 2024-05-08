@@ -53,6 +53,7 @@ def run():
     cur_pos_left = yumi.get_current_pose(yumi.LEFT)
     right = yumi.get_current_pose(yumi.RIGHT)
     print(cur_pos_left)
+    print(right)
 
     # print(right)
 
