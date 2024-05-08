@@ -3,17 +3,19 @@ import numpy as np
 import matplotlib.pyplot as plt 
 import warnings 
 warnings.filterwarnings("ignore")
-import math
 import torch
+import rospy
+import ros_numpy
 from PIL import Image
 #Install this DINO repo to extract correspondences: https://github.com/ShirAmir/dino-vit-features
 from DinoViT.correspondences import find_correspondences, draw_correspondences
-from scipy.spatial.transform import Rotation
-from trajectory_utils import create_homogeneous_matrix, pose_inv
+from trajectory_utils import pose_inv, translation_from_matrix, quaternion_from_matrix
+from sensor_msgs.msg import Image as ImageMsg
 
 class DINOBotAlignment:
-    def __init__(self):
+    def __init__(self, DIR):
         # Hyperparameters for DINO correspondences extraction
+        self.DIR = DIR
         self.num_pairs = 8 #@param
         self.load_size = 224 #@param
         self.layer = 9 #@param
@@ -22,10 +24,24 @@ class DINOBotAlignment:
         self.thresh = 0.05 #@param
         self.model_type = 'dino_vits8' #@param
         self.stride = 4 #@param
+
         self.camera_intrinsics = np.load("handeye/intrinsics_d405.npy")
         self.T_camera_eef = np.load("handeye/T_C_EEF_wrist_l.npy")
         self.show_plots = True
+        self.error_threshold = 50
 
+    def save_rgbd(self):
+        rgb_message_wrist = rospy.wait_for_message("d405/color/image_rect_raw", ImageMsg)
+        depth_message_wrist = rospy.wait_for_message("d405/aligned_depth_to_color/image_raw", ImageMsg)
+        rgb_image_wrist = Image.fromarray(ros_numpy.numpify(rgb_message_wrist))
+        depth_image_wrist = Image.fromarray(ros_numpy.numpify(depth_message_wrist))
+        rgb_dir = f"{self.DIR}/live_wrist_rgb.png"
+        depth_dir = f"{self.DIR}/live_wrist_depth.png"
+        rgb_image_wrist.save(rgb_dir)
+        depth_image_wrist.save(depth_dir)
+
+        return rgb_dir, depth_dir
+    
     @staticmethod
     def add_depth(points, depth_map, resized_shape):
         original_shape = depth_map.shape
@@ -70,12 +86,21 @@ class DINOBotAlignment:
         return np.linalg.norm(np.array(points1) - np.array(points2))
 
     def compute_new_eef_in_world(self, R, t, T_eef_world):
-        delta_camera = create_homogeneous_matrix(t, R)
-        return T_eef_world @ self.T_camera_eef @ delta_camera @ pose_inv(self.T_camera_eef)
+        delta_camera = np.eye(4) 
+        delta_camera[:3, :3] = R
+        delta_camera[:3, 3] = t 
+        T_new_eef_world = T_eef_world @ self.T_camera_eef @ delta_camera @ pose_inv(self.T_camera_eef)
+        xyz = translation_from_matrix(T_new_eef_world).tolist()
+        quaternion = quaternion_from_matrix(T_new_eef_world).tolist()
 
-    def run(self, rgb_live_path, depth_live_path, rgb_bn_path, depth_bn_path):
+        return xyz + quaternion
+
+    def run(self, rgb_live_path, depth_live_path):
+        rgb_bn_path = "{0}/demo_wrist_rgb.png".format(self.DIR) 
+        depth_bn_path = "{0}/demo_wrist_depth.png".format(self.DIR)
         depth_bn = np.array(Image.open(depth_bn_path))
         depth_live = np.array(Image.open(depth_live_path))
+
         with torch.no_grad():
             points1, points2, image1_pil, image2_pil = find_correspondences(rgb_bn_path, rgb_live_path, self.num_pairs, self.load_size, self.layer,
                                                                             self.facet, self.bin, self.thresh, self.model_type, self.stride)
@@ -98,5 +123,4 @@ class DINOBotAlignment:
         # A function to convert pixel distance into meters based on calibration of camera.
         delta_t_camera = self.convert_pixels_to_meters(t)
         error = self.compute_error(points1, points2)
-
         return delta_t_camera, delta_R_camera, error # delta_T in camera frame

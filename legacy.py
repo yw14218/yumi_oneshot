@@ -9,8 +9,8 @@ import yumi_moveit_utils as yumi
 import moveit_msgs.msg
 import geometry_msgs.msg
 from std_srvs.srv import Empty
-
-
+from trajectory_utils import pose_inv, translation_from_matrix, quaternion_from_matrix, create_homogeneous_matrix
+import numpy as np
 
 
 def move_and_grasp(arm, pose_ee, grip_effort):
@@ -50,9 +50,10 @@ def run():
     # # yumi.reset_calib()
     # yumi.reset_init()
 
-    left = yumi.get_current_pose(yumi.LEFT)
+    cur_pos_left = yumi.get_current_pose(yumi.LEFT)
     right = yumi.get_current_pose(yumi.RIGHT)
-    print(left)
+    print(cur_pos_left)
+
     # print(right)
 
     import threading
@@ -116,20 +117,42 @@ def run():
     # Print current joint angles
     # yumi.print_current_joint_states(yumi.RIGHT)
     # yumi.print_current_joint_states(yumi.LEFT)
-    back = [0.4118033296748138, 0.22378595991295266, 0.5793050897615559, 0.9934741742305934, -0.09152594162009686, 0.02502832203305602,0.06329020653785972]
 
-    p = [-0.23149050673610522, -0.07430196786188314, 0.14169564543333518, -2.96072169e-02, -2.72485617e-04, -7.42056474e-02,  9.96803321e-01]
+    # back = [0.4118033296748138, 0.22378595991295266, 0.5793050897615559, 0.9934741742305934, -0.09152594162009686, 0.02502832203305602,0.06329020653785972]
 
-    p_world = [0.63028744, 0.01503754, 0.43909581, 0.00170821,  0.9979961 , -0.06246973,  0.00991924]
+    p = [5.81602659e-01, -4.11032233e-04,  4.34927401e-01, -0.05171688,  0.99592506, -0.01054581,  0.07312605]
 
-    p_eef_new = [0.62040838, 0.08912966, 0.46735582, 0.99909779, -0.01761954,  0.01820735,  0.03408291]
-    # yumi.static_tf_broadcast("d405_color_optical_frame", "goal", p)
-    # yumi.static_tf_broadcast("world", "goal_world", p_world)
-    yumi.group_l.set_pose_target(p_eef_new)
 
-    plan = yumi.group_l.plan()
-    yumi.group_l.go(wait=True)
 
+    # p_world = [0.63028744, 0.01503754, 0.43909581, 0.00170821,  0.9979961 , -0.06246973,  0.00991924]
+
+    # p_eef_new = [0.62040838, 0.08912966, 0.46735582, 0.99909779, -0.01761954,  0.01820735,  0.03408291]
+    yumi.static_tf_broadcast("world", "goal", p)
+    # yumi.static_tf_broadcast("world", "goal_inverse", _p)
+    # # yumi.static_tf_broadcast("world", "goal_world", p_world)
+    # yumi.group_l.set_pose_target(p_eef_new)
+
+    # plan = yumi.group_l.plan()
+    # yumi.group_l.go(wait=True)
+
+    # T_camera_eef = np.load("handeye/T_C_EEF_wrist_l.npy")
+
+    # delta_camera = create_homogeneous_matrix([-0.026914832310566607, -0.0010070975963056296, 0.015953726103354653], [-0.04317059, -0.0422042 , -0.15648559,  0.98583334])
+    # T_new_eef_world = yumi.get_curent_T_left() @ T_camera_eef @ delta_camera @ pose_inv(T_camera_eef)
+    # xyz = translation_from_matrix(T_new_eef_world).tolist()
+    # quaternion = quaternion_from_matrix(T_new_eef_world).tolist()
+
+    # yumi.static_tf_broadcast("world", "goal_world", xyz + quaternion)
+
+    # # T_new_eef_world = T_camera_eef @ delta_camera @ pose_inv(T_camera_eef) @ yumi.get_curent_T_left()
+    # # xyz = translation_from_matrix(T_new_eef_world).tolist()
+    # # quaternion = quaternion_from_matrix(T_new_eef_world).tolist()
+
+    # # yumi.static_tf_broadcast("world", "goal_world_reverse", xyz + quaternion)
+
+    # yumi.group_l.set_pose_target(xyz+quaternion)
+    # plan = yumi.group_l.plan()
+    # yumi.group_l.go(wait=True)
     rospy.spin()
 
 
