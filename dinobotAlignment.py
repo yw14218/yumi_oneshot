@@ -28,11 +28,11 @@ class DINOBotAlignment:
         self.camera_intrinsics = np.load("handeye/intrinsics_d405.npy")
         self.T_camera_eef = np.load("handeye/T_C_EEF_wrist_l.npy")
         self.show_plots = True
-        self.error_threshold = 50
+        self.error_threshold = 0.02
 
     def save_rgbd(self):
-        rgb_message_wrist = rospy.wait_for_message("d405/color/image_rect_raw", ImageMsg)
-        depth_message_wrist = rospy.wait_for_message("d405/aligned_depth_to_color/image_raw", ImageMsg)
+        rgb_message_wrist = rospy.wait_for_message("d405/color/image_rect_raw", ImageMsg, timeout=5)
+        depth_message_wrist = rospy.wait_for_message("d405/aligned_depth_to_color/image_raw", ImageMsg, timeout=5)
         rgb_image_wrist = Image.fromarray(ros_numpy.numpify(rgb_message_wrist))
         depth_image_wrist = Image.fromarray(ros_numpy.numpify(depth_message_wrist))
         rgb_dir = f"{self.DIR}/live_wrist_rgb.png"
@@ -42,16 +42,15 @@ class DINOBotAlignment:
 
         return rgb_dir, depth_dir
     
-    @staticmethod
-    def add_depth(points, depth_map, resized_shape):
+    def add_depth(self, points, depth_map, resized_shape):
         original_shape = depth_map.shape
-        point_with_depth = []
+        points_3d = []
         for (y, x) in points:
             x = int(x / resized_shape[0] * original_shape[0])
             y = int(y / resized_shape[1] * original_shape[1])
-            point_with_depth.append([x, y, depth_map[y, x]])
+            points_3d.append(self.convert_pixels_to_meters([x, y, depth_map[y, x]]))
         
-        return point_with_depth
+        return points_3d
         
     def convert_pixels_to_meters(self, t):
         fx, fy = self.camera_intrinsics[0, 0], self.camera_intrinsics[1, 1]
@@ -116,11 +115,9 @@ class DINOBotAlignment:
 
         # Given the pixel coordinates of the correspondences, add the depth channel
         resized_shape = np.array(image1_pil).shape
-        points1 = self.add_depth(points1, depth_bn, resized_shape)
-        points2 = self.add_depth(points2, depth_live, resized_shape)
-        delta_R_camera, t = self.find_transformation(points1, points2)
+        points1_3d = self.add_depth(points1, depth_bn, resized_shape)
+        points2_3d = self.add_depth(points2, depth_live, resized_shape)
+        delta_R_camera, delta_t_camera = self.find_transformation(points1_3d, points2_3d)
+        error = self.compute_error(points1_3d, points2_3d)
 
-        # A function to convert pixel distance into meters based on calibration of camera.
-        delta_t_camera = self.convert_pixels_to_meters(t)
-        error = self.compute_error(points1, points2)
         return delta_t_camera, delta_R_camera, error # delta_T in camera frame
