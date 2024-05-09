@@ -69,7 +69,7 @@ def pose_inv(pose):
     T[:3, 3] = - R.T @ np.ascontiguousarray(pose[:3, 3])
     return T
 
-def apply_transformation_to_waypoints(waypoints_np, delta_R):
+def apply_transformation_to_waypoints(waypoints_np, delta_R, reverse=False):
     """
     Apply a transformation to a list of end-effector poses using NumPy vectorization.
     """
@@ -88,7 +88,7 @@ def apply_transformation_to_waypoints(waypoints_np, delta_R):
     RW_matrices[:, 3, 3] = 1
 
     # Apply the transformation
-    transformed_matrices = delta_R @ RW_matrices
+    transformed_matrices =  RW_matrices @ delta_R if reverse else delta_R @ RW_matrices
 
     # Extract translations and rotations from transformed matrices
     transformed_translations = transformed_matrices[:, :3, 3]
