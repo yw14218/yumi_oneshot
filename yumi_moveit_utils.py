@@ -647,8 +647,8 @@ def reset_init():
     group_both.go(wait=True)
     gripper_effort(LEFT, -15.0)
     gripper_effort(LEFT, 0.0)
-    gripper_effort(RIGHT, -15.0)
-    gripper_effort(RIGHT, 0.0)
+    # gripper_effort(RIGHT, -15.0)
+    # gripper_effort(RIGHT, 0.0)
 
     rospy.sleep(0.1)
 
