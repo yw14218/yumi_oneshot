@@ -69,7 +69,7 @@ def pose_inv(pose):
     T[:3, 3] = - R.T @ np.ascontiguousarray(pose[:3, 3])
     return T
 
-def apply_transformation_to_waypoints(waypoints_np, delta_R, reverse=False):
+def apply_transformation_to_waypoints(waypoints_np, delta_R, project3D=False):
     """
     Apply a transformation to a list of end-effector poses using NumPy vectorization.
     """
@@ -88,57 +88,71 @@ def apply_transformation_to_waypoints(waypoints_np, delta_R, reverse=False):
     RW_matrices[:, 3, 3] = 1
 
     # Apply the transformation
-    transformed_matrices =  RW_matrices @ delta_R if reverse else delta_R @ RW_matrices
+    transformed_matrices =  delta_R @ RW_matrices
 
     # Extract translations and rotations from transformed matrices
     transformed_translations = transformed_matrices[:, :3, 3]
     transformed_rotations = R.from_matrix(transformed_matrices[:, :3, :3]).as_quat()
+
+    if project3D:
+        rpy = R.from_matrix(delta_R[:3, :3]).as_euler("xyz")
+        yaw_only_delta_rotation = R.from_euler("xyz", [0, 0, rpy[-1]]).as_matrix()
+        yaw_only_transformed_rotations = yaw_only_delta_rotation @ waypoint_rot_matrices
+        transformed_translations[:, 2] = translations[:, 2]
+        transformed_rotations = R.from_matrix(yaw_only_transformed_rotations).as_quat()
+
 
     # Concatenate the results
     transformed_waypoints = np.hstack((transformed_translations, transformed_rotations))
 
     return transformed_waypoints.tolist()
 
-def align_trajectories(plan1, plan2):
-    """
-    Aligns the durations of two trajectories to have the same number of points by stretching 
-    the timeline of the shorter trajectory.
+def project3D(new_pose, ori_pose):
+    project_pose = copy.deepcopy(new_pose)
+    project_pose[2] = ori_pose[2]
 
-    This function modifies the shorter trajectory by increasing its time_from_start for each point,
-    distributing the points evenly over the duration of the longer trajectory. It ensures that both
-    trajectories will have points that correspond in time, facilitating synchronization of execution.
+    ori_euler = R.from_quat(ori_pose[3:]).as_euler("xyz")
+    new_euler = R.from_quat(new_pose[3:]).as_euler("xyz")
+
+    new_euler[0] = ori_euler[0]
+    new_euler[1] = ori_euler[1]
+
+    project_pose[3:] = R.from_euler("xyz", new_euler).as_quat()
+    return project_pose
+
+def align_trajectory_points(plan_left, plan_right):
+    """
+    Aligns the number of points in two trajectory plans by interpolating or decimating points as needed.
 
     Parameters:
-    - plan1 (RobotTrajectory): The first trajectory plan, assumed to be equal to or longer than plan2.
-    - plan2 (RobotTrajectory): The second trajectory plan, assumed to be shorter or equal to plan1.
+    - plan_left (RobotTrajectory): The trajectory plan for the left arm.
+    - plan_right (RobotTrajectory): The trajectory plan for the right arm.
 
     Returns:
-    - None: The function modifies plan2 in place; it does not return a value.
-
-    Note:
-    If plan2 is longer than plan1, the function will recursively call itself with swapped arguments.
-
-    Example:
-    - If plan1 has 10 points spread over 10 seconds and plan2 has 5 points spread over 5 seconds,
-      plan2's points will be adjusted to be 2 seconds apart, matching the 10-second span.
-
-    Raises:
-    - This function assumes that both plan1 and plan2 are valid RobotTrajectory objects and that
-      they have been properly initialized with joint_trajectory data. It will not work correctly
-      if these conditions are not met.
+    - Tuple[RobotTrajectory, RobotTrajectory]: A tuple containing the aligned trajectory plans for both arms.
     """
+    # Get the number of points in each trajectory
+    num_points_left = len(plan_left.joint_trajectory.points)
+    num_points_right = len(plan_right.joint_trajectory.points)
 
-    # Assuming plan1 is longer or equal to plan2
-    if len(plan1.joint_trajectory.points) > len(plan2.joint_trajectory.points):
-        scale_factor = len(plan1.joint_trajectory.points) / len(plan2.joint_trajectory.points)
+    # Calculate the ratio of points between the two trajectories
+    ratio = num_points_left / num_points_right
+
+    # Determine which plan has fewer points and interpolate or decimate points in the other plan
+    if num_points_left < num_points_right:
         new_points = []
-        for point in plan2.joint_trajectory.points:
-            new_point = copy.deepcopy(point)
-            new_point.time_from_start *= scale_factor
-            new_points.append(new_point)
-        plan2.joint_trajectory.points = new_points
-    elif len(plan1.joint_trajectory.points) < len(plan2.joint_trajectory.points):
-        align_trajectories(plan2, plan1)  # Swap roles
+        for i in range(num_points_left):
+            idx = int(np.round(i / ratio))
+            new_points.append(plan_right.joint_trajectory.points[idx])
+        plan_right.joint_trajectory.points = new_points
+    elif num_points_left > num_points_right:
+        new_points = []
+        for i in range(num_points_right):
+            idx = int(np.round(i * ratio))
+            new_points.append(plan_left.joint_trajectory.points[idx])
+        plan_left.joint_trajectory.points = new_points
+
+    return plan_left, plan_right
 
 
 def merge_trajectories(plan_left, plan_right):
@@ -164,7 +178,8 @@ def merge_trajectories(plan_left, plan_right):
     Assume plan_left and plan_right are precomputed RobotTrajectory objects with aligned trajectory points:
     merged_plan = merge_trajectories(plan_left, plan_right)
     """
-        
+
+    assert len(plan_left.joint_trajectory.points) == len(plan_right.joint_trajectory.points), "lengths of the trajectory points of the two plans do not match"
     # Create a new trajectory
     merged_trajectory = RobotTrajectory()
     merged_trajectory.joint_trajectory = JointTrajectory()

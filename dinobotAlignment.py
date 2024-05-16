@@ -119,5 +119,6 @@ class DINOBotAlignment:
         points2_3d = self.add_depth(points2, depth_live, resized_shape)
         delta_R_camera, delta_t_camera = self.find_transformation(points1_3d, points2_3d)
         error = self.compute_error(points1_3d, points2_3d)
+        rospy.loginfo('Error is ' + str(error) + ', while the stopping threshold is ' + str(self.error_threshold) + '. ')
 
         return delta_t_camera, delta_R_camera, error # delta_T in camera frame

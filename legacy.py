@@ -48,7 +48,7 @@ def run():
     # yumi.reset_pose()
 
     # # yumi.reset_calib()
-    # yumi.reset_init()
+    yumi.reset_init()
 
     cur_pos_left = yumi.get_current_pose(yumi.LEFT)
     right = yumi.get_current_pose(yumi.RIGHT)

@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 import json
+import sys
 import rospy
 import numpy as np
 import yumi_moveit_utils as yumi
 from poseEstimation import PoseEstimation
-from trajectory_utils import apply_transformation_to_waypoints,align_trajectories, merge_trajectories, \
-                             create_homogeneous_matrix
+from trajectory_utils import apply_transformation_to_waypoints, align_trajectory_points, merge_trajectories
 from dinobotAlignment import DINOBotAlignment
 
-MODE = "DINOBOT"
 DIR = "data/wood"
 OBJECT = "wood stand"
 
@@ -23,17 +22,16 @@ def replay(live_waypoints):
     """
     yumi.plan_both_arms(live_bottleneck_left, live_bottleneck_right)
 
-    # """
-    # Cartesian trajectories to reach the grasp pose
-    # """
-    # (plan_left, _) = yumi.group_l.compute_cartesian_path([yumi.create_pose(*live_grasp_left)], 0.01, 0.0)
-    # (plan_right, _) = yumi.group_r.compute_cartesian_path([yumi.create_pose(*live_grasp_right)], 0.01, 0.0)
+    """
+    Cartesian trajectories to reach the grasp pose
+    """
+    (plan_left, _) = yumi.group_l.compute_cartesian_path([yumi.create_pose(*live_grasp_left)], 0.01, 0.0)
+    (plan_right, _) = yumi.group_r.compute_cartesian_path([yumi.create_pose(*live_grasp_right)], 0.01, 0.0)
 
-    # # # Align the trajectories
-    # # align_trajectories(plan_left, plan_right)
-    # # # Merge them
-    # # merged_plan = merge_trajectories(plan_left, plan_right)
-    # # yumi.group_both.execute(merged_plan)
+    plan_left, plan_right = align_trajectory_points(plan_left, plan_right)
+    merged_plan = merge_trajectories(plan_left, plan_right)
+    merged_plan = yumi.group_both.retime_trajectory(yumi.robot.get_current_state(), merged_plan, 0.5, 0.5)
+    yumi.group_both.execute(merged_plan)
 
     # yumi.group_r.execute(plan_right)
     # rospy.sleep(0.2)
@@ -41,19 +39,19 @@ def replay(live_waypoints):
     # yumi.group_l.execute(plan_left)
     # rospy.sleep(0.2)
 
-    # """
-    # Close the grippers simultaneously
-    # """
-    # yumi.close_gripper_in_threads([yumi.LEFT, yumi.RIGHT])
+    """
+    Close the grippers simultaneously
+    """
+    yumi.close_gripper_in_threads([yumi.LEFT, yumi.RIGHT])
 
-    # rospy.sleep(0.1)
+    rospy.sleep(0.1)
 
-    # """
-    # Lifting trajectories
-    # """
-    # yumi.plan_both_arms(live_lift_left, live_lift_right)
+    """
+    Lifting trajectories
+    """
+    yumi.plan_both_arms(live_lift_left, live_lift_right)
 
-def run(dbn):
+def run(dbn, MODE):
 
     keys = ["bottleneck_left", "bottleneck_right", 
             "grasp_left", "grasp_right", 
@@ -99,6 +97,7 @@ def run(dbn):
     
 
 if __name__ == '__main__':
+    MODE = sys.argv[1]
     try:
         rospy.init_node('yumi_moveit_demo')
         yumi.init_Moveit()
@@ -106,8 +105,8 @@ if __name__ == '__main__':
 
         with open(file_name) as f:
             dbn = json.load(f)
-            # yumi.reset_init()
-            run(dbn)
+            yumi.reset_init()
+            run(dbn, MODE)
 
         rospy.spin()
     except Exception as e:

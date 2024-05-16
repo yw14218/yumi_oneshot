@@ -7,7 +7,7 @@ import copy
 from sensor_msgs.msg import Image as ImageMsg
 from PoseEst.direct.preprocessor import Preprocessor, pose_inv, SceneData
 from langSAM import LangSAMProcessor
-
+from trajectory_utils import create_homogeneous_matrix
 
 class PoseEstimation:
     def __init__(self, text_prompt, demo_rgb_path, demo_depth_path, demo_mask_path, intrinsics_path, T_WC_path):
@@ -58,7 +58,7 @@ class PoseEstimation:
         mask_image = Image.fromarray((mask_np * 255).astype(np.uint8))
 
         import os
-        self.live_rgb_path = os.path.join(folder_path, "live__head_rgb.png")
+        self.live_rgb_path = os.path.join(folder_path, "live_head_rgb.png")
         self.live_depth_path = os.path.join(folder_path, "live_head_depth.png")
         self.live_mask_path = os.path.join(folder_path, "live_head_seg.png")
         rgb_image.save(self.live_rgb_path)
@@ -178,20 +178,22 @@ class PoseEstimation:
     def run(self, output_path):
         rgb_image, depth_image, mask_image = self.inference_and_save(output_path)
         data = self.process_data(rgb_image, depth_image, mask_image)
+        
         return self.estimate_pose(data)
 
 if __name__ == '__main__':
     rospy.init_node('PoseEstimation', anonymous=True)
+    dir = "experiments/lego_split"
     pose_estimator = PoseEstimation(
         text_prompt="lego",
-        demo_rgb_path="data/lego_split/demo_rgb.png",
-        demo_depth_path="data/lego_split/demo_depth.png",
-        demo_mask_path="data/lego_split/demo_mask.png",
+        demo_rgb_path=f"{dir}/demo_rgb.png",
+        demo_depth_path=f"{dir}/demo_depth.png",
+        demo_mask_path=f"{dir}/demo_mask.png",
         intrinsics_path="handeye/intrinsics_d415.npy",
         T_WC_path="handeye/T_WC_head.npy"
     )
     try:
-        T_delta_world = pose_estimator.run(output_path="data/lego_split/")
+        T_delta_world = pose_estimator.run(output_path=f"{dir}/")
 
     except Exception as e:
         print(f"Error: {e}")
