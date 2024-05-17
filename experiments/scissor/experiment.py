@@ -45,12 +45,12 @@ class ScissorExperiment(YuMiExperiment):
         rospy.sleep(0.1)
         yumi.gripper_effort(yumi.LEFT, 20.0)
 
-        """
-        Operate the grippers simultaneously
-        """
-        rospy.sleep(0.2)
+        # """
+        # Operate the grippers simultaneously
+        # """
+        # rospy.sleep(0.2)
 
-        yumi.close_left_open_right_in_threads([yumi.LEFT, yumi.RIGHT])
+        # yumi.close_left_open_right_in_threads([yumi.LEFT, yumi.RIGHT])
 
         rospy.sleep(0.2)
 
@@ -58,11 +58,8 @@ class ScissorExperiment(YuMiExperiment):
         Uncovering trajectories
         """
         
-        yumi.group_l.set_pose_target(live_lift_left)
-        plan = yumi.group_l.plan()
-        yumi.group_l.go(wait=True)
-        yumi.group_l.stop()
-        yumi.group_l.clear_pose_targets()
+        (plan_left, _) = yumi.group_l.compute_cartesian_path([yumi.create_pose(*live_lift_left)], 0.01, 0.0)
+        yumi.group_l.execute(plan_left)
 
 if __name__ == '__main__':
     try:
