@@ -2,7 +2,7 @@ import rospy
 import ros_numpy
 import numpy as np
 import open3d as o3d
-from PIL import Image
+from PIL import Image, ImageDraw
 import copy
 from sensor_msgs.msg import Image as ImageMsg
 from PoseEst.direct.preprocessor import Preprocessor, pose_inv, SceneData
@@ -10,15 +10,25 @@ from langSAM import LangSAMProcessor
 from trajectory_utils import create_homogeneous_matrix
 
 class PoseEstimation:
-    def __init__(self, text_prompt, demo_rgb_path, demo_depth_path, demo_mask_path, intrinsics_path, T_WC_path):
+    def __init__(self, dir, text_prompt):
         self.langSAMProcessor = LangSAMProcessor(text_prompt=text_prompt)
-        self.demo_rgb_path = demo_rgb_path
-        self.demo_depth_path = demo_depth_path
-        self.demo_mask_path = demo_mask_path
-        self.intrinsics_path = intrinsics_path
-        self.T_WC_path = T_WC_path
+        self.dir = dir
+        self.demo_head_rgb_path = f"{self.dir}/demo_head_rgb.png"
+        self.demo_head_depth_path = f"{self.dir}/demo_head_depth.png"
+        self.demo_head_mask_path = f"{self.dir}/demo_head_seg.png"
+        
+        self.demo_wrist_rgb_path = f"{self.dir}/demo_wrist_rgb.png"
+        self.demo_wrist_depth_path = f"{self.dir}/demo_wrist_depth.png"
+        self.demo_wrist_mask_path = f"{self.dir}/demo_wrist_seg.png"
 
-    def get_live_data(self, timeout=5):
+        self.intrinsics_d415_path = "handeye/intrinsics_d405.npy"
+        self.T_WC_path = "handeye/T_WC_head.npy"
+
+        self.intrinsics_d405_path = "handeye/intrinsics_d415.npy"
+        self.T_CE_l_path = "handeye/T_C_EEF_wrist_l.npy"
+        
+
+    def get_live_data(self, camera_prefix, timeout=5):
         """
         Retrieve live RGB and depth data with a specified timeout.
 
@@ -32,21 +42,23 @@ class PoseEstimation:
             rospy.exceptions.ROSException: If the message is not received within the timeout.
         """
         try:
-            rgb_message = rospy.wait_for_message("/d415/color/image_raw", ImageMsg, timeout=timeout)
-            depth_message = rospy.wait_for_message("/d415/aligned_depth_to_color/image_raw", ImageMsg, timeout=timeout)
+            if camera_prefix == "d415":
+                rgb_message = rospy.wait_for_message(f"/d415/color/image_raw", ImageMsg, timeout=timeout)
+                depth_message = rospy.wait_for_message(f"/d415/aligned_depth_to_color/image_raw", ImageMsg, timeout=timeout)
+            elif camera_prefix == "d405":
+                rgb_message = rospy.wait_for_message("d405/color/image_rect_raw", ImageMsg, timeout=timeout)
+                depth_message = rospy.wait_for_message("d405/aligned_depth_to_color/image_raw", ImageMsg, timeout=timeout)
         except rospy.exceptions.ROSException as e:
             rospy.logerr(f"Data acquisition timed out: {e}")
             raise
 
         live_rgb = ros_numpy.numpify(rgb_message)
         live_depth = ros_numpy.numpify(depth_message)
-        
-        assert live_rgb.shape[0] == live_depth.shape[0] == 720
 
         return live_rgb, live_depth
 
-    def inference_and_save(self, folder_path):
-        live_rgb, live_depth = self.get_live_data()
+    def inference_and_save(self, camera_prefix, folder_path):
+        live_rgb, live_depth = self.get_live_data(camera_prefix)
         rgb_image = Image.fromarray(live_rgb)
         depth_image = Image.fromarray(live_depth)
 
@@ -58,9 +70,9 @@ class PoseEstimation:
         mask_image = Image.fromarray((mask_np * 255).astype(np.uint8))
 
         import os
-        self.live_rgb_path = os.path.join(folder_path, "live_head_rgb.png")
-        self.live_depth_path = os.path.join(folder_path, "live_head_depth.png")
-        self.live_mask_path = os.path.join(folder_path, "live_head_seg.png")
+        self.live_rgb_path = os.path.join(folder_path, f"live_{camera_prefix}_rgb.png")
+        self.live_depth_path = os.path.join(folder_path, f"live_{camera_prefix}_depth.png")
+        self.live_mask_path = os.path.join(folder_path, f"live_{camera_prefix}_seg.png")
         rgb_image.save(self.live_rgb_path)
         depth_image.save(self.live_depth_path)
         mask_image.save(self.live_mask_path)
@@ -68,17 +80,22 @@ class PoseEstimation:
         return rgb_image, depth_image, mask_image
 
 
-    def process_data(self, rgb_image, depth_image, mask_image):
+    def process_data(self, rgb_image, depth_image, mask_image, camera_prefix):
 
+        if camera_prefix == "d415":
+            demo_rgb = np.array(Image.open(self.demo_head_rgb_path))
+            demo_depth = np.array(Image.open(self.demo_head_depth_path))
+            demo_mask = np.array(Image.open(self.demo_head_mask_path))
+        elif camera_prefix == "d405":
+            demo_rgb = np.array(Image.open(self.demo_wrist_rgb_path))
+            demo_depth = np.array(Image.open(self.demo_wrist_depth_path))
+            demo_mask = np.array(Image.open(self.demo_wrist_mask_path))
 
-        demo_rgb = np.array(Image.open(self.demo_rgb_path))
-        demo_depth = np.array(Image.open(self.demo_depth_path))
-        demo_mask = np.array(Image.open(self.demo_mask_path))
-        
         live_rgb = np.array(rgb_image)
         live_depth = np.array(depth_image)
         live_mask = np.array(mask_image)
-        intrinsics = np.load(self.intrinsics_path)
+        
+        intrinsics = np.load(self.intrinsics_d415_path) if camera_prefix == "d415" else np.load(self.intrinsics_d405_path)
 
         data = SceneData(
             image_0=demo_rgb,
@@ -94,7 +111,6 @@ class PoseEstimation:
 
         processor = Preprocessor()
         data.update(processor(data))
-
         return data
 
     def estimate_pose(self, data):
@@ -164,36 +180,30 @@ class PoseEstimation:
         # Get the transformation matrix
         T_delta_cam = reg_p2p.transformation
 
+        
         # Draw the result
         # draw_registration_result(pcd0, pcd1, T_delta_cam)
-        rospy.loginfo(f"ICP Fitness: {reg_p2p.fitness}")
-        rospy.loginfo(f"ICP Inlier RMSE: {reg_p2p.inlier_rmse}")
+        # rospy.loginfo(f"ICP Fitness: {reg_p2p.fitness}")
+        # rospy.loginfo(f"ICP Inlier RMSE: {reg_p2p.inlier_rmse}")
         
-        T_WC = np.load("handeye/T_WC_head.npy")
-        T_delta_world = T_WC @ T_delta_cam @ pose_inv(T_WC)
-        rospy.loginfo("T_delta_world is {0}".format(T_delta_world))
+        return T_delta_cam
 
-        return T_delta_world
-
-    def run(self, output_path):
-        rgb_image, depth_image, mask_image = self.inference_and_save(output_path)
-        data = self.process_data(rgb_image, depth_image, mask_image)
+    def run(self, output_path, camera_prefix):
+        rgb_image, depth_image, mask_image = self.inference_and_save(camera_prefix, output_path)
+        data = self.process_data(rgb_image, depth_image, mask_image, camera_prefix)
         
         return self.estimate_pose(data)
 
 if __name__ == '__main__':
     rospy.init_node('PoseEstimation', anonymous=True)
     dir = "experiments/lego_split"
+
     pose_estimator = PoseEstimation(
+        dir=dir,
         text_prompt="lego",
-        demo_rgb_path=f"{dir}/demo_rgb.png",
-        demo_depth_path=f"{dir}/demo_depth.png",
-        demo_mask_path=f"{dir}/demo_mask.png",
-        intrinsics_path="handeye/intrinsics_d415.npy",
-        T_WC_path="handeye/T_WC_head.npy"
     )
     try:
-        T_delta_world = pose_estimator.run(output_path=f"{dir}/")
+        T_delta_world = pose_estimator.run(output_path=f"{dir}/", camera_prefix="d415")
 
     except Exception as e:
         print(f"Error: {e}")

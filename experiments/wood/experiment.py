@@ -38,8 +38,8 @@ class WoodExperiment(YuMiExperiment):
         # yumi.group_r.execute(plan_right)
         # rospy.sleep(0.2)
 
-        # yumi.group_l.execute(plan_left)
-        # rospy.sleep(0.2)
+        # # yumi.group_l.execute(plan_left)
+        # # rospy.sleep(0.2)
 
         """
         Close the grippers simultaneously
@@ -55,10 +55,10 @@ class WoodExperiment(YuMiExperiment):
 
 if __name__ == '__main__':
     try:
-        rospy.init_node('yumi_moveit_demo')
+        rospy.init_node('yumi_wood_experiment')
         yumi.init_Moveit()
 
-        MODE = "REPLAY"
+        MODE = "HEADCAM"
         scissorExperiment = WoodExperiment("experiments/wood", "wood stand", MODE)
         yumi.reset_init()
         scissorExperiment.run()
