@@ -10,9 +10,10 @@ from langSAM import LangSAMProcessor
 from trajectory_utils import create_homogeneous_matrix
 
 class PoseEstimation:
-    def __init__(self, dir, text_prompt):
+    def __init__(self, dir, text_prompt, visualize):
         self.langSAMProcessor = LangSAMProcessor(text_prompt=text_prompt)
         self.dir = dir
+        self.visualize = visualize
         self.demo_head_rgb_path = f"{self.dir}/demo_head_rgb.png"
         self.demo_head_depth_path = f"{self.dir}/demo_head_depth.png"
         self.demo_head_mask_path = f"{self.dir}/demo_head_seg.png"
@@ -63,7 +64,7 @@ class PoseEstimation:
         depth_image = Image.fromarray(live_depth)
 
         # Ensure mask_np is correctly generated and not None before proceeding
-        mask_np = self.langSAMProcessor.inference(live_rgb, single_mask=True, visualize_info=True)
+        mask_np = self.langSAMProcessor.inference(live_rgb, single_mask=True, visualize_info=self.visualize)
         if mask_np is None:
             raise ValueError("No mask returned from inference.")
 
@@ -113,7 +114,7 @@ class PoseEstimation:
         data.update(processor(data))
         return data
 
-    def estimate_pose(self, data):
+    def estimate_pose(self, data, camera_prefix):
 
         # Function to draw registration results
         def draw_registration_result(source, target, transformation):
@@ -130,49 +131,78 @@ class PoseEstimation:
         pcd0.points = o3d.utility.Vector3dVector(data["pc0"][:, :3])
         pcd1.points = o3d.utility.Vector3dVector(data["pc1"][:, :3])
 
+        # Global registration using FGR
+        
+            # Estimate normals for each point cloud
+            # pcd0.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=40))
+            # pcd1.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=40))
 
-        # o3d.visualization.draw_geometries([pcd0, pcd1])
 
-        # Estimate normals for each point cloud
-        pcd0.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=40))
-        pcd1.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=40))
+        if camera_prefix == "d405":
+            # Compute FPFH features
+            voxel_size = 0.001 # Set voxel size for downsampling (adjust based on your data)
+
+            source_down = pcd0.voxel_down_sample(voxel_size)
+            target_down = pcd1.voxel_down_sample(voxel_size)
+
+            source_down.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 2, max_nn=30))
+            target_down.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 2, max_nn=30))
+
+            source_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
+                source_down,
+                o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 5, max_nn=100))
+
+            target_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
+                target_down,
+                o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 5, max_nn=100))
+        
+            # Global registration using FGR
+            distance_threshold = voxel_size * 0.5
+            result = o3d.pipelines.registration.registration_fgr_based_on_feature_matching(
+                source_down, target_down, source_fpfh, target_fpfh,
+                o3d.pipelines.registration.FastGlobalRegistrationOption(
+                    maximum_correspondence_distance=distance_threshold))
 
 
-        # Compute FPFH features
-        voxel_size = 0.05  # Set voxel size for downsampling (adjust based on your data)
-        source_down = pcd0.voxel_down_sample(voxel_size)
-        target_down = pcd1.voxel_down_sample(voxel_size)
+            # Use the result of global registration as the initial transformation for ICP
+            trans_init = result.transformation
 
-        source_down.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 2, max_nn=30))
-        target_down.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 2, max_nn=30))
+        else:
+            # Compute FPFH features
+            voxel_size = 0.05 # Set voxel size for downsampling (adjust based on your data)
+            source_down = pcd0.voxel_down_sample(voxel_size)
+            target_down = pcd1.voxel_down_sample(voxel_size)
 
-        source_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
-            source_down,
-            o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 5, max_nn=100))
+            source_down.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 2, max_nn=30))
+            target_down.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 2, max_nn=30))
 
-        target_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
-            target_down,
-            o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 5, max_nn=100))
+            source_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
+                source_down,
+                o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 5, max_nn=100))
 
-        # Global registration using RANSAC
-        distance_threshold = voxel_size * 1.5
-        result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
-            source_down, target_down, source_fpfh, target_fpfh, mutual_filter=False,
-            max_correspondence_distance=distance_threshold,
-            estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(), 
-            ransac_n=4,
-            checkers=[
-                o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.9), 
-                o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(distance_threshold)
-            ],
-            criteria=o3d.pipelines.registration.RANSACConvergenceCriteria(4000000, 500)
-        )
+            target_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
+                target_down,
+                o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 5, max_nn=100))
+        
+            # Global registration using RANSAC
+            distance_threshold = voxel_size * 1.5
+            result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
+                source_down, target_down, source_fpfh, target_fpfh, mutual_filter=False,
+                max_correspondence_distance=distance_threshold,
+                estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(), 
+                ransac_n=4,
+                checkers=[
+                    o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.9), 
+                    o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(distance_threshold)
+                ],
+                criteria=o3d.pipelines.registration.RANSACConvergenceCriteria(4000000, 500)
+            )
 
-        # Use the result of global registration as the initial transformation for ICP
-        trans_init = result.transformation
+            # Use the result of global registration as the initial transformation for ICP
+            trans_init = result.transformation
 
         # Apply ICP
-        threshold = 0.02  # Set a threshold for ICP, this depends on your data
+        threshold = 0.01  # Set a threshold for ICP, this depends on your data
         reg_p2p = o3d.pipelines.registration.registration_icp(
             pcd0, pcd1, threshold, trans_init,
             o3d.pipelines.registration.TransformationEstimationPointToPoint())
@@ -180,7 +210,7 @@ class PoseEstimation:
         # Get the transformation matrix
         T_delta_cam = reg_p2p.transformation
 
-        
+
         # Draw the result
         # draw_registration_result(pcd0, pcd1, T_delta_cam)
         # rospy.loginfo(f"ICP Fitness: {reg_p2p.fitness}")
@@ -192,7 +222,10 @@ class PoseEstimation:
         rgb_image, depth_image, mask_image = self.inference_and_save(camera_prefix, output_path)
         data = self.process_data(rgb_image, depth_image, mask_image, camera_prefix)
         
-        return self.estimate_pose(data)
+        if camera_prefix == 'd415':
+            return np.mean(data["pc1"][:, :3], axis=0) - np.mean(data["pc0"][:, :3], axis=0) 
+        
+        return self.estimate_pose(data, camera_prefix)
 
 if __name__ == '__main__':
     rospy.init_node('PoseEstimation', anonymous=True)

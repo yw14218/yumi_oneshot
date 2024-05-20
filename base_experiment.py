@@ -32,21 +32,27 @@ class YuMiExperiment(ABC):
             pose_estimator = PoseEstimation(
                 dir=self.dir,
                 text_prompt=self.object,
+                visualize=False
             )
 
             while True:
-                T_delta_cam = pose_estimator.run(output_path=f"{self.dir}/", camera_prefix="d415")
-                T_WC = np.load(pose_estimator.T_WC_path)
-                T_delta_world = T_WC @ T_delta_cam @ pose_inv(T_WC)
+                # T_delta_cam = pose_estimator.run(output_path=f"{self.dir}/", camera_prefix="d415")
+                # T_WC = np.load(pose_estimator.T_WC_path)
+                # T_delta_world = T_WC @ T_delta_cam @ pose_inv(T_WC)
+                T_delta_world = np.eye(4)
+                dxyz = pose_estimator.run(output_path=f"{self.dir}/", camera_prefix="d415")
+                T_delta_world[0, 3] = dxyz[0]
+                T_delta_world[1, 3] = dxyz[1]
                 rospy.loginfo("T_delta_world is {0}".format(T_delta_world))
                 live_waypoints = apply_transformation_to_waypoints(demo_waypoints, T_delta_world, project3D=True)
                 yumi.plan_both_arms(live_waypoints[0], live_waypoints[1])
                 # self.replay(live_waypoints)
                 rospy.sleep(3)
 
+                # raise NotImplementedError
+
                 error = 1000
-                user_input = "y"
-                while user_input == "y":
+                while error > 0.005:
                     T_delta_cam = pose_estimator.run(output_path=f"{self.dir}/", camera_prefix="d405")
                     T_camera_eef = np.load(pose_estimator.T_CE_l_path)
                     T_new_eef_world = yumi.get_curent_T_left() @ T_camera_eef @ T_delta_cam @ pose_inv(T_camera_eef)
@@ -58,15 +64,17 @@ class YuMiExperiment(ABC):
                     pose_new_eef_world_l = project3D(xyz + quaternion, demo_waypoints[0])
                     yumi.plan_left_arm(pose_new_eef_world_l)
                     rospy.sleep(0.1)
-                    user_input = input("Go? (yes/no): ").lower()
+
+
                     
-                user_input = input("Go? (yes/no): ").lower()
-                if user_input == 'go':
-                    T_bottleneck_left = create_homogeneous_matrix(demo_waypoints[0][:3], demo_waypoints[0][3:])
-                    T_delta_world = yumi.get_curent_T_left() @ pose_inv(T_bottleneck_left)
-                    print(T_delta_world)
-                    live_waypoints = apply_transformation_to_waypoints(demo_waypoints, T_delta_world, project3D=True)
-                    self.replay(live_waypoints)
+                    
+                # user_input = input("Go? (yes/no): ").lower()
+                # if user_input == 'go':
+                T_bottleneck_left = create_homogeneous_matrix(demo_waypoints[0][:3], demo_waypoints[0][3:])
+                T_delta_world = yumi.get_curent_T_left() @ pose_inv(T_bottleneck_left)
+                print(T_delta_world)
+                live_waypoints = apply_transformation_to_waypoints(demo_waypoints, T_delta_world, project3D=True)
+                self.replay(live_waypoints)
 
                 # del pose_estimator
                 # dinobot_alignment = DINOBotAlignment(DIR=self.dir)
