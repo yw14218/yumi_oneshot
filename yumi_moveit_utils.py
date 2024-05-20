@@ -19,6 +19,7 @@ LEFT = 2        #:ID of the left arm
 RIGHT = 1       #:ID of the right arm
 BOTH = 3        #:ID of both_arms
 PI = 3.1415926  #:Value of PI
+TORELANCE = 0.0005
 
 table_height = 0.09 #:The height of the upper surface of the table
 table_distance_x = 0.74
@@ -84,24 +85,24 @@ def init_Moveit():
     group_l.set_planner_id("ESTkConfigDefault")
     group_l.set_pose_reference_frame("world")
     group_l.allow_replanning(False)
-    group_l.set_goal_position_tolerance(0.005)
-    group_l.set_goal_orientation_tolerance(0.005)
+    group_l.set_goal_position_tolerance(TORELANCE)
+    group_l.set_goal_orientation_tolerance(TORELANCE)
     group_l.set_max_velocity_scaling_factor(0.2)
 
     group_r = moveit_commander.MoveGroupCommander("right_arm")
     group_r.set_planner_id("ESTkConfigDefault")
     group_r.set_pose_reference_frame("world")
     group_r.allow_replanning(False)
-    group_r.set_goal_position_tolerance(0.005)
-    group_r.set_goal_orientation_tolerance(0.005)
-    group_r.set_max_velocity_scaling_factor(0.2)
+    group_r.set_goal_position_tolerance(TORELANCE)
+    group_r.set_goal_orientation_tolerance(TORELANCE)
+    group_r.set_max_velocity_scaling_factor(0.1)
 
     group_both = moveit_commander.MoveGroupCommander("both_arms")
     group_both.set_planner_id("ESTkConfigDefault")
     group_both.set_pose_reference_frame("world")
     group_both.allow_replanning(False)
-    group_both.set_goal_position_tolerance(0.005)
-    group_both.set_goal_orientation_tolerance(0.005)
+    group_both.set_goal_position_tolerance(TORELANCE)
+    group_both.set_goal_orientation_tolerance(TORELANCE)
     group_both.set_max_velocity_scaling_factor(0.2)
 
 
@@ -303,8 +304,9 @@ def gripper_effort(gripper_id, effort):
     :returns: Nothing
     :rtype: None
     """
-    rospy.loginfo("Setting gripper " + str(gripper_id) + " to " + str(effort))
-    rospy.loginfo('Setting gripper effort to ' + str(effort) + ' for arm ' + str(gripper_id))
+    
+    # rospy.loginfo("Setting gripper " + str(gripper_id) + " to " + str(effort))
+    # rospy.loginfo('Setting gripper effort to ' + str(effort) + ' for arm ' + str(gripper_id))
     
     if (gripper_id == RIGHT):
         pubname = '/yumi/gripper_r_effort_cmd'

@@ -23,12 +23,14 @@ class ScissorExperiment(YuMiExperiment):
         """
         yumi.plan_both_arms(live_bottleneck_left, live_bottleneck_right)
 
+        rospy.sleep(0.1)
         yumi.close_grippers(yumi.RIGHT)
 
         """
         Cartesian trajectories to reach the grasp pose
         """
-        (plan_left, _) = yumi.group_l.compute_cartesian_path([yumi.create_pose(*live_grasp_left)], 0.01, 0.0)
+        live_grasp_right[2] += 0.01
+        # (plan_left, _) = yumi.group_l.compute_cartesian_path([yumi.create_pose(*live_grasp_left)], 0.01, 0.0)
         (plan_right, _) = yumi.group_r.compute_cartesian_path([yumi.create_pose(*live_grasp_right)], 0.01, 0.0)
 
         # # # Align the trajectories
@@ -39,27 +41,27 @@ class ScissorExperiment(YuMiExperiment):
 
         yumi.group_r.execute(plan_right)
         rospy.sleep(0.1)
-        yumi.gripper_effort(yumi.RIGHT, -20.0)
+        # yumi.gripper_effort(yumi.RIGHT, -20.0)
 
-        yumi.group_l.execute(plan_left)
-        rospy.sleep(0.1)
-        yumi.gripper_effort(yumi.LEFT, 20.0)
+        # yumi.group_l.execute(plan_left)
+        # rospy.sleep(0.1)
+        # yumi.gripper_effort(yumi.LEFT, 20.0)
 
-        # """
-        # Operate the grippers simultaneously
-        # """
+        # # """
+        # # Operate the grippers simultaneously
+        # # """
+        # # rospy.sleep(0.2)
+
+        # # yumi.close_left_open_right_in_threads([yumi.LEFT, yumi.RIGHT])
+
         # rospy.sleep(0.2)
 
-        # yumi.close_left_open_right_in_threads([yumi.LEFT, yumi.RIGHT])
-
-        rospy.sleep(0.2)
-
-        """
-        Uncovering trajectories
-        """
+        # """
+        # Uncovering trajectories
+        # """
         
-        (plan_left, _) = yumi.group_l.compute_cartesian_path([yumi.create_pose(*live_lift_left)], 0.01, 0.0)
-        yumi.group_l.execute(plan_left)
+        # (plan_left, _) = yumi.group_l.compute_cartesian_path([yumi.create_pose(*live_lift_left)], 0.01, 0.0)
+        # yumi.group_l.execute(plan_left)
 
 if __name__ == '__main__':
     try:
