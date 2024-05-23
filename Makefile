@@ -25,7 +25,8 @@ launch_all:
 	@sleep 1
 	@echo "Launching RealSense Camera..."
 	@gnome-terminal -- bash -c "source /opt/ros/foxy/setup.bash && source /opt/ros/foxy/local_setup.bash && \
-	 (ros2 launch realsense2_camera rs_launch.py align_depth.enable:=true device_type:=d405 camera_name:=d405)"
+	 (ros2 launch realsense2_camera rs_launch.py align_depth.enable:=true spatial_filter.enable:=true temporal_filter.enable:=true device_type:=d405 camera_name:=d405 &) && \
+	 (ros2 launch realsense2_camera rs_launch.py align_depth.enable:=true spatial_filter.enable:=true temporal_filter.enable:=true device_type:=d415 camera_name:=d415)"
 
 launch_bridge:
 	@echo "Launching ROS1 Bridge..."
@@ -34,8 +35,8 @@ launch_bridge:
 launch_camera:
 	@echo "Launching RealSense Camera..."
 	@bash -c "source /opt/ros/foxy/setup.bash && source /opt/ros/foxy/local_setup.bash && \
-	 (ros2 launch realsense2_camera rs_launch.py align_depth.enable:=true device_type:=d405 camera_name:=d405 &) && \
-	 (ros2 launch realsense2_camera rs_launch.py align_depth.enable:=true device_type:=d415 camera_name:=d415)"
+	 (ros2 launch realsense2_camera rs_launch.py pointcloud.enable:=true align_depth.enable:=true spatial_filter.enable:=true temporal_filter.enable:=true device_type:=d405 camera_name:=d405 &) && \
+	 (ros2 launch realsense2_camera rs_launch.py align_depth.enable:=true spatial_filter.enable:=true temporal_filter.enable:=true device_type:=d415 camera_name:=d415)"
 
 launch_d415:
 	@echo "Launching RealSense Camera..."

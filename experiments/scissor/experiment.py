@@ -68,7 +68,7 @@ if __name__ == '__main__':
         rospy.init_node('yumi_moveit_demo')
         yumi.init_Moveit()
 
-        MODE = "HEADCAM"
+        MODE = "KEL"
         # MODE = "DINOBOT"
         scissorExperiment = ScissorExperiment("experiments/scissor", "black scissor", MODE)
         yumi.reset_init()

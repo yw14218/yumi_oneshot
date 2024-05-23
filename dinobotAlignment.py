@@ -53,12 +53,16 @@ class DINOBotAlignment:
         return points_3d
         
     def convert_pixels_to_meters(self, t):
+        t[2] /= 1000
         fx, fy = self.camera_intrinsics[0, 0], self.camera_intrinsics[1, 1]
         cx, cy =  self.camera_intrinsics[0, 2],  self.camera_intrinsics[1, 2]
-        x = (t[0] - cx) * t[2] / fx
-        y = (t[1] - cy) * t[2] / fy 
+        x_over_z = (t[0] - cx) / fx
+        y_over_z = (t[1] - cy) / fy 
+        z = t[2] / np.sqrt(1. + x**2 + y**2)
+        x = x_over_z * z
+        y = y_over_z * z
         
-        return (x / 1000, y / 1000, t[2] / 1000)
+        return (x, y, z)
 
     @staticmethod
     def find_transformation(X, Y):
