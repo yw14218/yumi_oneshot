@@ -637,22 +637,27 @@ def reset_calib():
 
 
 # Resets both arms to init
-def reset_init():
+def reset_init(arm=None):
 
     safeJointPositionL = [-0.1346624195575714, -1.2939683198928833, 1.152125597000122, 0.8828295469284058, -1.433053731918335, -0.6675148606300354, -0.33587437868118286]
     safeJointPositionR = [0.13037508726119995, -1.293479084968567, -1.1520023345947266, 0.882483184337616, 1.4386858940124512, -0.6661921739578247, 0.3313935697078705]
 
-    global group_both
+    if arm is None:
+        group_both.set_joint_value_target(safeJointPositionL + safeJointPositionR)
+        group_both.go(wait=True)
+        gripper_effort(LEFT, -15.0)
+        gripper_effort(LEFT, 0.0)
+        gripper_effort(RIGHT, -15.0)
+        gripper_effort(RIGHT, 0.0)
+    elif arm == LEFT:
+        group_l.set_joint_value_target(safeJointPositionL)
+        group_l.go(wait=True)
+        gripper_effort(LEFT, -15.0)
+        gripper_effort(LEFT, 0.0)
+    else:
+        raise NotImplementedError
 
-
-    group_both.set_joint_value_target(safeJointPositionL + safeJointPositionR)
-    group_both.go(wait=True)
-    gripper_effort(LEFT, -15.0)
-    gripper_effort(LEFT, 0.0)
-    gripper_effort(RIGHT, -15.0)
-    gripper_effort(RIGHT, 0.0)
-
-    rospy.sleep(0.1)
+    rospy.sleep(0.1) 
 
 def static_tf_broadcast(parent_id, child_id, pose_in_list) -> None:
     br = tf2_ros.StaticTransformBroadcaster()
