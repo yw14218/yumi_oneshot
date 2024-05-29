@@ -654,6 +654,11 @@ def reset_init(arm=None):
         group_l.go(wait=True)
         gripper_effort(LEFT, -15.0)
         gripper_effort(LEFT, 0.0)
+    elif arm == RIGHT:
+        group_r.set_joint_value_target(safeJointPositionR)
+        group_r.go(wait=True)
+        gripper_effort(RIGHT, -15.0)
+        gripper_effort(RIGHT, 0.0)
     else:
         raise NotImplementedError
 

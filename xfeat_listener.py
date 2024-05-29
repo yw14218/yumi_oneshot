@@ -8,6 +8,7 @@ import numpy as np
 import poselib
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
+from kornia.geometry.homography import find_homography_dlt
 
 class ImageListener:
     def __init__(self, dir, video=False):
@@ -16,9 +17,11 @@ class ImageListener:
         self.last_time = time.time()
         self.fps = 0
         self.demo_rgb = cv2.imread(f"{dir}/demo_wrist_rgb.png")[...,::-1].copy()
-        self.xfeat = torch.hub.load('verlab/accelerated_features', 'XFeat', pretrained = True, top_k = 4096)
+        self.demo_rgbs = np.tile(self.demo_rgb, (3, 1, 1, 1))
+        self.xfeat = torch.hub.load('verlab/accelerated_features', 'XFeat', pretrained = True, top_k = 2048)
         self.stable_point = [499.86090324, 103.8931002]
-        self.stable_point = [449.02001965, 130.47966086]
+
+        # self.stable_points = torch.stack(self.stable_point for i in range (5))
         rospy.loginfo("Image listener node initialized.")
 
         if video:
@@ -32,27 +35,53 @@ class ImageListener:
         else:
             self.video_writer = None
 
-    def image_callback(self, data):
-
-        try:
-            live_rgb = self.bridge.imgmsg_to_cv2(data, "rgb8")
-        except CvBridgeError as e:
-            rospy.logerr(f"CvBridge Error: {e}")
-            return
-        
-        try:
-            mkpts_0, mkpts_1 = self.xfeat.match_xfeat_star(self.demo_rgb, live_rgb, top_k = 4096)
-        except AttributeError as e:
-            return
-        
-        H = poselib.estimate_homography(mkpts_0, mkpts_1)[0]
-
+    def estimate_homography(self, mkpts):
+        mkpts_0_np = mkpts[:, :2].cpu().numpy().reshape(-1, 2)  # Convert tensor to numpy array
+        mkpts_1_np = mkpts[:, 2:].cpu().numpy().reshape(-1, 2)  # Convert tensor to numpy array
+        H, _ = poselib.estimate_homography(mkpts_0_np, mkpts_1_np)
         key_point_demo = np.array(self.stable_point, dtype=np.float32).reshape(-1, 1, 2)
         key_point_live_hom = cv2.perspectiveTransform(key_point_demo, H)
         x, y = key_point_live_hom[0][0]
 
+        return x, y
+    
+    def image_callback(self, data):
+        
+        live_rgbs = np.empty((3, 480, 848, 3), dtype=np.uint8)
+        try:
+            for i in range(3):
+                live_rgb = self.bridge.imgmsg_to_cv2(data, "rgb8")
+                live_rgbs[i] = live_rgb
+        except CvBridgeError as e:
+            rospy.logerr(f"CvBridge Error: {e}")
+            return
+        
+        start = time.time()
+        try:
+            mkpts_list = self.xfeat.match_xfeat_star(self.demo_rgbs, live_rgbs, top_k = 2048)
+        except AttributeError as e:
+            return
+
+        X = 0
+        Y = 0
+        for mkpts in mkpts_list:
+            x, y = self.estimate_homography(mkpts)
+            X += x
+            Y += y
+        # tensor_batch = torch.stack(mkpts_list)
+        # Hs = find_homography_dlt(tensor_batch[:, :, :2], tensor_batch[:, :, 2:])
+ 
+        # for H in Hs:
+        #     H = H.cpu().numpy()
+        #     key_point_demo = np.array(self.stable_point, dtype=np.float32).reshape(-1, 1, 2)
+        #     key_point_live_hom = cv2.perspectiveTransform(key_point_demo, H)
+        #     x, y = key_point_live_hom[0][0]
+        #     xs += x
+        #     ys += y
+
+        print(time.time() - start)
         # Calculate Error
-        err = np.linalg.norm(np.array([x, y]) - np.array(self.stable_point))
+        # err = np.linalg.norm(np.array([x, y]) - np.array(self.stable_point))
 
         # Calculate FPS
         current_time = time.time()
@@ -60,9 +89,9 @@ class ImageListener:
         self.last_time = current_time
         
         # Put texts on the image
-        cv2.circle(live_rgb, (int(x), int(y)), 5, (0, 0, 255), 3)
+        cv2.circle(live_rgb, (int(X/3), int(Y/3)), 5, (0, 0, 255), 3)
         cv2.putText(live_rgb, f"FPS: {self.fps:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-        cv2.putText(live_rgb, f"ERROR: {err:.2f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        # cv2.putText(live_rgb, f"ERROR: {err:.2f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
         if self.video_writer is not None:
             self.video_writer.write(live_rgb[...,::-1])
@@ -76,7 +105,7 @@ class ImageListener:
 
 if __name__ == '__main__':
     rospy.init_node('image_listener', anonymous=True)
-    il = ImageListener(dir="experiments/wood")
+    il = ImageListener(dir="experiments/scissor")
     try:
         rospy.spin()
     except KeyboardInterrupt:
