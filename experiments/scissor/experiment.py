@@ -12,7 +12,8 @@ from base_experiment import YuMiExperiment
 
 class ScissorExperiment(YuMiExperiment):
     
-    def replay(self, live_waypoints):
+    @staticmethod
+    def replay(live_waypoints, arm=None):
 
         live_bottleneck_left, live_bottleneck_right, \
         live_grasp_left, live_grasp_right, \
@@ -21,7 +22,15 @@ class ScissorExperiment(YuMiExperiment):
         """
         Move to the bottlenecks
         """
-        yumi.plan_both_arms(live_bottleneck_left, live_bottleneck_right)
+
+        if arm is None:
+            yumi.plan_both_arms(live_bottleneck_left, live_bottleneck_right)
+        elif arm == yumi.RIGHT:
+            yumi.plan_right_arm(live_bottleneck_right)
+        elif arm == yumi.LEFT:
+            yumi.plan_left_arm(live_bottleneck_left)
+        else:
+            raise NotImplementedError
 
         rospy.sleep(0.1)
         yumi.close_grippers(yumi.RIGHT)
@@ -29,8 +38,8 @@ class ScissorExperiment(YuMiExperiment):
         """
         Cartesian trajectories to reach the grasp pose
         """
-        live_grasp_right[2] += 0.01
-        # (plan_left, _) = yumi.group_l.compute_cartesian_path([yumi.create_pose(*live_grasp_left)], 0.01, 0.0)
+
+        (plan_left, _) = yumi.group_l.compute_cartesian_path([yumi.create_pose(*live_grasp_left)], 0.01, 0.0)
         (plan_right, _) = yumi.group_r.compute_cartesian_path([yumi.create_pose(*live_grasp_right)], 0.01, 0.0)
 
         # # # Align the trajectories
@@ -41,34 +50,34 @@ class ScissorExperiment(YuMiExperiment):
 
         yumi.group_r.execute(plan_right)
         rospy.sleep(0.1)
-        # yumi.gripper_effort(yumi.RIGHT, -20.0)
+        yumi.gripper_effort(yumi.RIGHT, -20.0)
 
-        # yumi.group_l.execute(plan_left)
-        # rospy.sleep(0.1)
-        # yumi.gripper_effort(yumi.LEFT, 20.0)
+        yumi.group_l.execute(plan_left)
+        rospy.sleep(0.1)
+        yumi.gripper_effort(yumi.LEFT, 20.0)
 
-        # # """
-        # # Operate the grippers simultaneously
-        # # """
-        # # rospy.sleep(0.2)
-
-        # # yumi.close_left_open_right_in_threads([yumi.LEFT, yumi.RIGHT])
-
+        # """
+        # Operate the grippers simultaneously
+        # """
         # rospy.sleep(0.2)
 
-        # """
-        # Uncovering trajectories
-        # """
+        # yumi.close_left_open_right_in_threads([yumi.LEFT, yumi.RIGHT])
+
+        rospy.sleep(0.2)
+
+        """
+        Uncovering trajectories
+        """
         
-        # (plan_left, _) = yumi.group_l.compute_cartesian_path([yumi.create_pose(*live_lift_left)], 0.01, 0.0)
-        # yumi.group_l.execute(plan_left)
+        (plan_left, _) = yumi.group_l.compute_cartesian_path([yumi.create_pose(*live_lift_left)], 0.01, 0.0)
+        yumi.group_l.execute(plan_left)
 
 if __name__ == '__main__':
     try:
         rospy.init_node('yumi_moveit_demo')
         yumi.init_Moveit()
 
-        MODE = "KEL"
+        MODE = "REPLAY"
         # MODE = "DINOBOT"
         scissorExperiment = ScissorExperiment("experiments/scissor", "black scissor", MODE)
         yumi.reset_init()

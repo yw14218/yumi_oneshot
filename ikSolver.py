@@ -30,7 +30,7 @@ class IKSolver:
 
         try:
             response = self.compute_ik(request)  # type: GetPositionIKResponse
-            rospy.loginfo("IK successfully computed")
+            # rospy.loginfo("IK successfully computed")
             return response
         except rospy.ServiceException as e:
             rospy.logerr('Service call failed: {}'.format(e))
