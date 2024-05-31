@@ -15,7 +15,7 @@ from poseEstimation import PoseEstimation
 import json
 import time
 from threading import Event, Lock
-from camera_utils import convert_from_uvd, d405_K as K, d405_T_C_EEF as T_C_EEF
+from camera_utils import convert_from_uvd, d405_K as K, d405_T_C_EEF as T_C_EEF, d415_T_WC as T_WC
 import copy
 from experiments.scissor.experiment import ScissorExperiment
 
@@ -49,18 +49,29 @@ stab_point_2D = stab_3d_cam[:2] / stab_3d_cam[2]
 stab_point_2D_np = np.array(stab_point_2D, dtype=np.float32).reshape(-1, 1, 2)
 
 yumi.init_Moveit()
-yumi.reset_init(yumi.RIGHT)
+yumi.reset_init()
+
+pose_estimator = PoseEstimation(
+    dir=DIR,
+    text_prompt=OBJ,
+    visualize=False
+)
+
+user_input = input("Continue? (yes/no): ").lower()
+if user_input == "ready":
+    pass
+    
 yumi.plan_left_arm(yumi.create_pose(*bottleneck_left))
 yumi.open_grippers(yumi.LEFT)
 
 try:
-    pose_estimator = PoseEstimation(
-        dir=DIR,
-        text_prompt=OBJ,
-        visualize=False
-    )
-
     while True:
+        # Initial head cam alignment
+        T_delta_cam = pose_estimator.run(output_path=f"{DIR}/", camera_prefix="d415")
+        T_delta_world = T_WC @ T_delta_cam @ pose_inv(T_WC)
+        live_waypoints = apply_transformation_to_waypoints(demo_waypoints[:2], T_delta_world, project3D=True)
+        yumi.plan_left_arm(yumi.create_pose(*live_waypoints[0]))
+
         # Initial wrist cam alignment
         T_delta_cam = pose_estimator.run(output_path=f"{DIR}/", camera_prefix="d405")
         T_new_eef_world = yumi.get_curent_T_left() @ T_C_EEF @ T_delta_cam @ pose_inv(T_C_EEF)
@@ -80,33 +91,38 @@ try:
         mkpts_0, mkpts_1 = xfeat.match_xfeat_star(demo_rgb, live_rgb, top_k = 4096)
         H, mask = cv2.findHomography(mkpts_0, mkpts_1, cv2.USAC_MAGSAC, 5.0)
         x, y = cv2.perspectiveTransform(stab_point_2D_np, H)[0][0]
-        x, y, z = convert_from_uvd(K, x, y, stab_3d_cam[-1]/1000)
+        x, y, z = convert_from_uvd(K, x, y, stab_3d_cam[-1])
 
         # Transform to 3d in world frame and transform from gripper pose to eef pose
         x, y, z = (yumi.get_curent_T_left()  @ T_C_EEF @ create_homogeneous_matrix([x, y, z], [0, 0, 0, 1]))[:3, 3]
-        T_live_stab_pose = project3D(T_delta_world @ T_stab_pose, T_stab_pose)
-        T_eef_world  = create_homogeneous_matrix([x, y, z], quaternion_from_matrix(T_live_stab_pose)) @ pose_inv(T_GRIP_EEF)
+        T_new_stab_pose = T_delta_world @ T_stab_pose
+        new_stab_pose = translation_from_matrix(T_new_stab_pose).tolist() + quaternion_from_matrix(T_new_stab_pose).tolist()
         
-        # Re-estimate T_delta_world using updated live_stab_x, live_stab_y of eef
-        x, y, z = T_eef_world[:3, 3].tolist()        
-        T_live_stab_pose[0, 3] = x
-        T_live_stab_pose[1, 3] = y
-        T_live_stab_pose[2, 3] = stab_pose[-1]
-        T_delta_world =  T_live_stab_pose @ pose_inv(T_stab_pose)
+        # Romove roll and pitch componenents
+        new_stab_pose = project3D(new_stab_pose, stab_pose)
+        T_new_stab_pose_refined = create_homogeneous_matrix([x, y, z], new_stab_pose[3:]) @ pose_inv(T_GRIP_EEF)
 
-        # Apply T_delta_world to rest of trajectories
+        # Re-estimate T_delta_world using updated live_stab_x, live_stab_y of eef       
+        T_new_stab_pose_refined[2, 3] = stab_pose[-1]
+        T_delta_world =  T_new_stab_pose_refined @ pose_inv(T_stab_pose)
+
+        # # Apply T_delta_world to rest of trajectories
         live_waypoints = apply_transformation_to_waypoints(demo_waypoints, T_delta_world, project3D=True)
-        ScissorExperiment.replay(live_waypoints, yumi.RIGHT)
+        ScissorExperiment.replay(live_waypoints, arm=yumi.RIGHT)
         
         user_input = input("Continue? (yes/no): ").lower()
-        if user_input != 'yes':
-            break
-        else:
+        if user_input == "yes":
+            yumi.reset_init(yumi.RIGHT)
             yumi.open_grippers(yumi.LEFT)
             yumi.plan_left_arm(yumi.create_pose(*bottleneck_left))
-            yumi.reset_init(yumi.RIGHT)
             rospy.sleep(1)
-
+        elif user_input == "reset":
+            yumi.reset_init(yumi.RIGHT)
+            yumi.open_grippers(yumi.LEFT)
+            yumi.plan_left_arm(yumi.create_pose(*bottleneck_left))
+            break
+        else:
+            break
     rospy.spin()
 
 except Exception as e:
