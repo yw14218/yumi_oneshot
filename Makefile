@@ -25,8 +25,8 @@ launch_all:
 	@sleep 1
 	@echo "Launching RealSense Camera..."
 	@gnome-terminal -- bash -c "source /opt/ros/foxy/setup.bash && source /opt/ros/foxy/local_setup.bash && \
-	 (ros2 launch realsense2_camera rs_launch.py rgb_camera.color_profile:=848x480x30 depth_module.profile:=848x480x30 align_depth.enable:=true spatial_filter.enable:=true temporal_filter.enable:=true device_type:=d405 camera_name:=d405 &) && \
-	 (ros2 launch realsense2_camera rs_launch.py align_depth.enable:=true spatial_filter.enable:=true temporal_filter.enable:=true device_type:=d415 camera_name:=d415)"
+	 (ros2 launch realsense2_camera rs_launch.py rgb_camera.color_profile:=848x480x30 depth_module.profile:=848x480x30 align_depth.enable:=true spatial_filter.enable:=true temporal_filter.enable:=true hole_filling_filter:=true device_type:=d405 camera_name:=d405 &) && \
+	 (ros2 launch realsense2_camera rs_launch.py align_depth.enable:=true decimation_filter:=true spatial_filter.enable:=true temporal_filter.enable:=true hole_filling_filter:=true device_type:=d415 camera_name:=d415)"
 
 launch_bridge:
 	@echo "Launching ROS1 Bridge..."
@@ -35,18 +35,18 @@ launch_bridge:
 launch_camera:
 	@echo "Launching RealSense Camera..."
 	@bash -c "source /opt/ros/foxy/setup.bash && source ~/ros2_foxy/install/setup.bash && \
-	 (ros2 launch realsense2_camera rs_launch.py rgb_camera.color.profile:=848x480x30 depth_module.profile:=848x480x30 align_depth.enable:=true spatial_filter.enable:=true temporal_filter.enable:=true device_type:=d405 camera_name:=d405 &) && \
-	 (ros2 launch realsense2_camera rs_launch.py align_depth.enable:=true spatial_filter.enable:=true temporal_filter.enable:=true device_type:=d415 camera_name:=d415)"
+	 (ros2 launch realsense2_camera rs_launch.py rgb_camera.color.profile:=848x480x30 depth_module.profile:=848x480x30 align_depth.enable:=true spatial_filter.enable:=true temporal_filter.enable:=true hole_filling_filter:=true device_type:=d405 camera_name:=d405 &) && \
+	 (ros2 launch realsense2_camera rs_launch.py align_depth.enable:=true decimation_filter:=true spatial_filter.enable:=true temporal_filter.enable:=true hole_filling_filter:=true device_type:=d415 camera_name:=d415)"
 
 launch_d415:
 	@echo "Launching RealSense Camera..."
 	@bash -c "source /opt/ros/foxy/setup.bash && source ~/ros2_foxy/install/setup.bash && \
-	 (ros2 launch realsense2_camera rs_launch.py align_depth.enable:=true device_type:=d415 camera_name:=d415)"
+	 (ros2 launch realsense2_camera rs_launch.py align_depth.enable:=true decimation_filter:=true spatial_filter.enable:=true temporal_filter.enable:=true hole_filling_filter:=true device_type:=d415 camera_name:=d415)"
 
 launch_d405:
 	@echo "Launching RealSense Camera..."
 	@bash -c "source /opt/ros/foxy/setup.bash && source ~/ros2_foxy/install/setup.bash && \
-	 (ros2 launch realsense2_camera rs_launch.py rgb_camera.color.profile:=848x480x30 depth_module.profile:=848x480x30 align_depth.enable:=true spatial_filter.enable:=true temporal_filter.enable:=true device_type:=d405 camera_name:=d405)"
+	 (ros2 launch realsense2_camera rs_launch.py rgb_camera.color.profile:=848x480x30 depth_module.profile:=848x480x30 align_depth.enable:=true spatial_filter.enable:=true temporal_filter.enable:=true hole_filling_filter:=true device_type:=d405 camera_name:=d405)"
 
 launch_yumi:
 	@echo "Setting network configuration for Yumi..."
@@ -62,8 +62,3 @@ stop:
 	@echo "Stopping all ROS nodes..."
 	@pkill -f ros
 
-
-# source /opt/ros/foxy/setup.bash && ros2 run ros1_bridge dynamic_bridge --bridge-all-topics
-# ros2 launch realsense2_camera rs_multi_camera_launch.py camera_name1:=D415 camera_name2:=D405 device_type1:=d415 device_type2:=d405 pointcloud.enable:=true
-# ros2 launch realsense2_camera rs_launch.py align_depth.enable:=true device_type:=d405 camera_name:=d405
-# ros2 launch realsense2_camera rs_launch.py align_depth.enable:=true device_type:=d415 camera_name:=d415

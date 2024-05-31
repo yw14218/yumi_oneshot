@@ -95,7 +95,7 @@ def init_Moveit():
     group_r.allow_replanning(False)
     group_r.set_goal_position_tolerance(TORELANCE)
     group_r.set_goal_orientation_tolerance(TORELANCE)
-    group_r.set_max_velocity_scaling_factor(0.1)
+    group_r.set_max_velocity_scaling_factor(0.2)
 
     group_both = moveit_commander.MoveGroupCommander("both_arms")
     group_both.set_planner_id("ESTkConfigDefault")
