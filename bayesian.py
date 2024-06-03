@@ -48,7 +48,7 @@ class BayesianController:
         
         self.optimizer = BayesianOptimization(
             f=self.black_box_function,
-            pbounds={'delta_yaw': (-5, 5)},
+            pbounds={'delta_yaw': (-30, 30)},
             random_state=1,
             bounds_transformer = SequentialDomainReductionTransformer(minimum_window=0.5),
             verbose=2
@@ -141,23 +141,6 @@ class BayesianController:
                 break
             next_point = self.optimizer.suggest(self.utility)
             target, prediction = self.black_box_function(**next_point)
-            if target > self.min_variance_and_corresponding_point3d[0]:
-                self.min_variance_and_corresponding_point3d[0] = target
-                depth_message = rospy.wait_for_message("d405/aligned_depth_to_color/image_raw", Image, timeout=5)
-                depth_image = self.bridge.imgmsg_to_cv2(depth_message, "32FC1")
-                z = np.array(depth_image)[int(prediction[1]), int(prediction[0])]
-                x, y, z = convert_from_uvd(K, prediction[0], prediction[1], z /1000)
-                T_EEF_WORLD = yumi.get_curent_T_left() 
-                xyz_world = (T_EEF_WORLD @ T_C_EEF @ create_homogeneous_matrix([x, y, z], [0, 0, 0, 1]))[:3, 3]
-                x, y, z = xyz_world
-                self.min_variance_and_corresponding_point3d[1] = [x, y, z]
-
-                T_grip_world = np.eye(4)
-                T_grip_world[:3, :3] = self.T_stablizing_pose[:3, :3]
-                T_grip_world[:3, 3] = xyz_world
-                xyz_eef = (T_grip_world @ pose_inv(self.T_GRIP_EEF))[:3, 3]
-                self.xyz_eef_goal = xyz_eef
-
             self.optimizer.register(params=next_point, target=target)
 
             # print(target, next_point)
@@ -219,10 +202,16 @@ class BayesianController:
 
         plt.show()
 
+def get_current_stab_3d(T_EEF_World):
+    stab_point3d = pose_inv(T_EEF_World @ T_C_EEF) @ T_stab_pose @ T_GRIP_EEF
+    # Project the 3D point onto the image plane
+    return np.dot(K, stab_point3d[:3, 3])
+
 if __name__ == "__main__":
     rospy.init_node('yumi_bayesian_controller', anonymous=True)
-    DIR = "experiments/scissor"
-    OBJ = "scissor"
+    DIR = "experiments/wood"
+    OBJ = "wood stand"
+    T_GRIP_EEF = create_homogeneous_matrix([0, 0, 0.100], [0, 0, 0, 1])
     demo_image_path = f"{DIR}/demo_wrist_rgb.png"
 
     yumi.init_Moveit()
@@ -232,7 +221,17 @@ if __name__ == "__main__":
         dbn = json.load(f)
     demo_waypoints = np.vstack([dbn[key] for key in dbn.keys()])
 
+    file_name = f"{DIR}/demo_bottlenecks.json"
+
+
     bottleneck_left = demo_waypoints[0].tolist()
+    stab_pose = demo_waypoints[3].tolist()
+    T_bottleneck_left = create_homogeneous_matrix(bottleneck_left[:3], bottleneck_left[3:])
+    T_stab_pose = create_homogeneous_matrix(stab_pose[:3], stab_pose[3:])
+    stab_3d_cam = get_current_stab_3d(T_EEF_World=T_bottleneck_left)
+    # Normalize the coordinates to get the 2D image point
+    stab_point_2D = stab_3d_cam[:2] / stab_3d_cam[2]
+    
     yumi.plan_left_arm(yumi.create_pose(*bottleneck_left))
 
     try:
@@ -251,7 +250,7 @@ if __name__ == "__main__":
         yumi.plan_left_arm(pose_new_eef_world_l)
 
         yumi_optimizer = BayesianController(demo_image_path=demo_image_path, stablizing_pose=demo_waypoints[2])
-        optimal = yumi_optimizer.optimize(80)
+        optimal = yumi_optimizer.optimize(30)
         r = optimal['params']['delta_yaw']
         print(f"Best delta_yaw found: {r}")
         yumi_optimizer.move_eef(0 ,0, r)    

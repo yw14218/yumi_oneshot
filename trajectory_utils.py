@@ -200,3 +200,18 @@ def merge_trajectories(plan_left, plan_right):
         merged_trajectory.joint_trajectory.points.append(new_point)
 
     return merged_trajectory
+
+def compute_pre_grasp_pose(grasp_pos, grasp_quat, approach_distance=0.1):
+    # Convert quaternion to rotation matrix
+    rotation = R.from_quat(grasp_quat).as_matrix()
+
+    # Approach vector is the negative Z-axis of the end-effector in world frame
+    approach_vector = -rotation[:, 2]
+
+    # Compute the pre-grasp position
+    pre_grasp_pos = grasp_pos + approach_vector * approach_distance
+
+    # Pre-grasp orientation is the same as grasp orientation
+    pre_grasp_quat = grasp_quat
+
+    return np.concatenate([pre_grasp_pos, pre_grasp_quat])

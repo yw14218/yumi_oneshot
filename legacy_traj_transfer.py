@@ -85,7 +85,7 @@ def run():
                                 0.0)         # jump_threshold
 
     if (fraction == 1.0):
-        plan = yumi.group_l.retime_trajectory(yumi.robot.get_current_state(), plan, 0.2, 0.2)
+        plan = yumi.group_l.retime_trajectory(yumi.robot.get_current_state(), plan, 0.5, 0.5)
         plan = remove_duplicate_time_points(plan)
 
     rospy.loginfo("Displaying trajectories")
