@@ -9,9 +9,13 @@ import poselib
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
 from kornia.geometry.homography import find_homography_dlt
+import json
+from camera_utils import convert_from_uvd, d405_K as K, d405_T_C_EEF as T_C_EEF, d415_T_WC as T_WC
+from trajectory_utils import translation_from_matrix, quaternion_from_matrix, pose_inv, \
+                             project3D, create_homogeneous_matrix, apply_transformation_to_waypoints
 
 class ImageListener:
-    def __init__(self, dir, video=False):
+    def __init__(self, dir, stable_point, video=False):
         self.bridge = CvBridge()
         self.image_sub = rospy.Subscriber("d405/color/image_rect_raw", Image, self.image_callback)
         self.last_time = time.time()
@@ -19,7 +23,7 @@ class ImageListener:
         self.demo_rgb = cv2.imread(f"{dir}/demo_wrist_rgb.png")[...,::-1].copy()
         self.demo_rgbs = np.tile(self.demo_rgb, (3, 1, 1, 1))
         self.xfeat = torch.hub.load('verlab/accelerated_features', 'XFeat', pretrained = True, top_k = 2048)
-        self.stable_point = [499.86090324, 103.8931002]
+        self.stable_point = stable_point
 
         # self.stable_points = torch.stack(self.stable_point for i in range (5))
         rospy.loginfo("Image listener node initialized.")
@@ -81,7 +85,7 @@ class ImageListener:
 
         print(time.time() - start)
         # Calculate Error
-        # err = np.linalg.norm(np.array([x, y]) - np.array(self.stable_point))
+        err = np.linalg.norm(np.array([X/3, Y/3]) - np.array(self.stable_point))
 
         # Calculate FPS
         current_time = time.time()
@@ -91,7 +95,7 @@ class ImageListener:
         # Put texts on the image
         cv2.circle(live_rgb, (int(X/3), int(Y/3)), 5, (0, 0, 255), 3)
         cv2.putText(live_rgb, f"FPS: {self.fps:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-        # cv2.putText(live_rgb, f"ERROR: {err:.2f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        cv2.putText(live_rgb, f"ERROR: {err:.2f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
         if self.video_writer is not None:
             self.video_writer.write(live_rgb[...,::-1])
@@ -103,9 +107,34 @@ class ImageListener:
         # Optionally, save the image to a file
         # cv2.imwrite("/path/to/save/image.jpg", cv_image)
 
+def get_current_stab_3d(T_EEF_World):
+    stab_point3d = pose_inv(T_EEF_World @ T_C_EEF) @ T_stab_pose @ T_GRIP_EEF
+    # Project the 3D point onto the image plane
+    return np.dot(K, stab_point3d[:3, 3])
+
+T_GRIP_EEF = create_homogeneous_matrix([0, 0, 0.100], [0, 0, 0, 1])
+
 if __name__ == '__main__':
     rospy.init_node('image_listener', anonymous=True)
-    il = ImageListener(dir="experiments/scissor")
+    DIR = "experiments/pencile_sharpener"
+    file_name = f"{DIR}/demo_bottlenecks.json"
+
+    with open(file_name) as f:
+        dbn = json.load(f)
+    demo_waypoints = np.vstack([dbn[key] for key in dbn.keys()])
+
+    bottleneck_left = demo_waypoints[0].tolist()
+    bottleneck_right = demo_waypoints[1].tolist()
+    stab_pose = dbn["grasp_right"]
+    T_bottleneck_left = create_homogeneous_matrix(bottleneck_left[:3], bottleneck_left[3:])
+    T_stab_pose = create_homogeneous_matrix(stab_pose[:3], stab_pose[3:])
+    stab_3d_cam = get_current_stab_3d(T_EEF_World=T_bottleneck_left)
+    # Normalize the coordinates to get the 2D image point
+    stab_point_2D = stab_3d_cam[:2] / stab_3d_cam[2]
+
+    il = ImageListener(dir=DIR, stable_point=stab_point_2D)
+
+
     try:
         rospy.spin()
     except KeyboardInterrupt:

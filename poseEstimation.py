@@ -116,15 +116,6 @@ class PoseEstimation:
 
     def estimate_pose(self, data, camera_prefix):
 
-        # Function to draw registration results
-        def draw_registration_result(source, target, transformation):
-            source_temp = copy.deepcopy(source)
-            target_temp = copy.deepcopy(target)
-            source_temp.transform(transformation)
-            source_temp.paint_uniform_color([1, 0.706, 0])
-            target_temp.paint_uniform_color([0, 0.651, 0.929])
-            o3d.visualization.draw_geometries([source_temp, target_temp])
-
         pcd0 = o3d.geometry.PointCloud()
         pcd1 = o3d.geometry.PointCloud()
 
@@ -222,9 +213,6 @@ class PoseEstimation:
         rgb_image, depth_image, mask_image = self.inference_and_save(camera_prefix, output_path)
         data = self.process_data(rgb_image, depth_image, mask_image, camera_prefix)
         
-        # if camera_prefix == 'd415':
-        #     return np.mean(data["pc1"][:, :3], axis=0) - np.mean(data["pc0"][:, :3], axis=0) 
-        
         return self.estimate_pose(data, camera_prefix)
 
     def run_image_match(self, output_path, camera_prefix):
@@ -299,11 +287,12 @@ class PoseEstimation:
 
 if __name__ == '__main__':
     rospy.init_node('PoseEstimation', anonymous=True)
-    dir = "experiments/lego_split"
+    dir = "experiments/scissor"
 
     pose_estimator = PoseEstimation(
         dir=dir,
-        text_prompt="lego",
+        text_prompt="black scissor",
+        visualize=False
     )
     try:
         T_delta_world = pose_estimator.run(output_path=f"{dir}/", camera_prefix="d415")

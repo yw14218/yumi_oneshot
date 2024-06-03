@@ -645,8 +645,8 @@ def reset_init(arm=None):
     if arm is None:
         group_both.set_joint_value_target(safeJointPositionL + safeJointPositionR)
         group_both.go(wait=True)
-        gripper_effort(LEFT, -15.0)
-        gripper_effort(LEFT, 0.0)
+        # gripper_effort(LEFT, -15.0)
+        # gripper_effort(LEFT, 0.0)
         gripper_effort(RIGHT, -15.0)
         gripper_effort(RIGHT, 0.0)
     elif arm == LEFT:
@@ -712,12 +712,12 @@ def get_curent_T_left():
 
     return T_eef_world
 
-def close_gripper_in_threads(arms):
+def operate_gripper_in_threads(arms, close):
     """
     Close operations on arms in separate threads.
     """
     def grip(arm):
-        gripper_effort(arm, 20.0)
+        gripper_effort(arm, 20.0 if close else -20.0)
         
     threads = []
     for arm in arms:

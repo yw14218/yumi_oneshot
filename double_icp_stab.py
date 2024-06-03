@@ -18,6 +18,8 @@ from threading import Event, Lock
 from camera_utils import convert_from_uvd, d405_K as K, d405_T_C_EEF as T_C_EEF, d415_T_WC as T_WC
 import copy
 from experiments.scissor.experiment import ScissorExperiment
+from experiments.wood.experiment import WoodExperiment
+from experiments.pencile_sharpener.experiment import SharpenerExperiment
 
 def get_current_stab_3d(T_EEF_World):
     stab_point3d = pose_inv(T_EEF_World @ T_C_EEF) @ T_stab_pose @ T_GRIP_EEF
@@ -25,12 +27,22 @@ def get_current_stab_3d(T_EEF_World):
     return np.dot(K, stab_point3d[:3, 3])
 
 rospy.init_node('yumi_bayesian_controller', anonymous=True)
+
 DIR = "experiments/scissor"
-OBJ = "scissor"
+OBJ = "black scissor"
+T_GRIP_EEF = create_homogeneous_matrix([0, 0, 0.136], [0, 0, 0, 1])
+
+DIR = "experiments/wood"
+OBJ = "wood stand"
+T_GRIP_EEF = create_homogeneous_matrix([0, 0, 0.100], [0, 0, 0, 1])
+
+DIR = "experiments/pencile_sharpener"
+OBJ = "blue pencile sharpener"
+T_GRIP_EEF = create_homogeneous_matrix([0, 0, 0.128], [0, 0, 0, 1])
+
 bridge = CvBridge() 
 xfeat = torch.hub.load('verlab/accelerated_features', 'XFeat', pretrained = True, top_k = 4096)   
 demo_rgb = cv2.imread(f"{DIR}/demo_wrist_rgb.png")[..., ::-1].copy() 
-
 
 file_name = f"{DIR}/demo_bottlenecks.json"
 with open(file_name) as f:
@@ -39,8 +51,7 @@ demo_waypoints = np.vstack([dbn[key] for key in dbn.keys()])
 
 bottleneck_left = demo_waypoints[0].tolist()
 bottleneck_right = demo_waypoints[1].tolist()
-stab_pose = demo_waypoints[3].tolist()
-T_GRIP_EEF = create_homogeneous_matrix([0, 0, 0.136], [0, 0, 0, 1])
+stab_pose = dbn["grasp_right"]
 T_bottleneck_left = create_homogeneous_matrix(bottleneck_left[:3], bottleneck_left[3:])
 T_stab_pose = create_homogeneous_matrix(stab_pose[:3], stab_pose[3:])
 stab_3d_cam = get_current_stab_3d(T_EEF_World=T_bottleneck_left)
@@ -49,7 +60,7 @@ stab_point_2D = stab_3d_cam[:2] / stab_3d_cam[2]
 stab_point_2D_np = np.array(stab_point_2D, dtype=np.float32).reshape(-1, 1, 2)
 
 yumi.init_Moveit()
-yumi.reset_init()
+# yumi.reset_init()
 
 pose_estimator = PoseEstimation(
     dir=DIR,
@@ -61,26 +72,27 @@ user_input = input("Continue? (yes/no): ").lower()
 if user_input == "ready":
     pass
     
-yumi.plan_left_arm(yumi.create_pose(*bottleneck_left))
-yumi.open_grippers(yumi.LEFT)
+# yumi.plan_left_arm(yumi.create_pose(*bottleneck_left))
+# yumi.open_grippers(yumi.LEFT)
+yumi.gripper_effort(yumi.LEFT, 20)
 
 try:
     while True:
         # Initial head cam alignment
-        T_delta_cam = pose_estimator.run(output_path=f"{DIR}/", camera_prefix="d415")
-        T_delta_world = T_WC @ T_delta_cam @ pose_inv(T_WC)
-        live_waypoints = apply_transformation_to_waypoints(demo_waypoints[:2], T_delta_world, project3D=True)
-        yumi.plan_left_arm(yumi.create_pose(*live_waypoints[0]))
+        # T_delta_cam = pose_estimator.run(output_path=f"{DIR}/", camera_prefix="d415")
+        # T_delta_world = T_WC @ T_delta_cam @ pose_inv(T_WC)
+        # live_waypoints = apply_transformation_to_waypoints(demo_waypoints[:2], T_delta_world, project3D=True)
+        # yumi.plan_left_arm(yumi.create_pose(*live_waypoints[0]))
 
-        # Initial wrist cam alignment
-        T_delta_cam = pose_estimator.run(output_path=f"{DIR}/", camera_prefix="d405")
-        T_new_eef_world = yumi.get_curent_T_left() @ T_C_EEF @ T_delta_cam @ pose_inv(T_C_EEF)
-        new_eef_world = translation_from_matrix(T_new_eef_world).tolist() + quaternion_from_matrix(T_new_eef_world).tolist()
-        live_bottleneck_left = project3D(new_eef_world, bottleneck_left)
+        # # Initial wrist cam alignment
+        # T_delta_cam = pose_estimator.run(output_path=f"{DIR}/", camera_prefix="d405")
+        # T_new_eef_world = yumi.get_curent_T_left() @ T_C_EEF @ T_delta_cam @ pose_inv(T_C_EEF)
+        # new_eef_world = translation_from_matrix(T_new_eef_world).tolist() + quaternion_from_matrix(T_new_eef_world).tolist()
+        # live_bottleneck_left = project3D(new_eef_world, bottleneck_left)
 
-        # Move to wrist-cam-depth estimated bottlenck
-        yumi.plan_left_arm(live_bottleneck_left)
-        rospy.sleep(1)
+        # # Move to wrist-cam-depth estimated bottlenck
+        # yumi.plan_left_arm(live_bottleneck_left)
+        # rospy.sleep(0.5)
 
         # Compute equivalent T_delta_world estimate
         T_delta_world = yumi.get_curent_T_left() @ pose_inv(T_bottleneck_left)
@@ -108,18 +120,13 @@ try:
 
         # # Apply T_delta_world to rest of trajectories
         live_waypoints = apply_transformation_to_waypoints(demo_waypoints, T_delta_world, project3D=True)
-        ScissorExperiment.replay(live_waypoints, arm=yumi.RIGHT)
+        SharpenerExperiment.replay(live_waypoints)
         
         user_input = input("Continue? (yes/no): ").lower()
         if user_input == "yes":
-            yumi.reset_init(yumi.RIGHT)
-            yumi.open_grippers(yumi.LEFT)
-            yumi.plan_left_arm(yumi.create_pose(*bottleneck_left))
-            rospy.sleep(1)
+            SharpenerExperiment.reset()
         elif user_input == "reset":
-            yumi.reset_init(yumi.RIGHT)
-            yumi.open_grippers(yumi.LEFT)
-            yumi.plan_left_arm(yumi.create_pose(*bottleneck_left))
+            SharpenerExperiment.reset()
             break
         else:
             break
