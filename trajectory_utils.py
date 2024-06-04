@@ -61,6 +61,12 @@ def quaternion_from_matrix(matrix):
     rotation = R.from_matrix(rotation_matrix)
     return rotation.as_quat()
 
+def euler_from_matrix(matrix):
+    """Extracts the euler from a 4x4 homogeneous transformation matrix."""
+    rotation_matrix = matrix[:3, :3]
+    rotation = R.from_matrix(rotation_matrix)
+    return rotation.as_euler("xyz")
+
 def pose_inv(pose):
     """Inverse a 4x4 homogeneous transformation matrix."""
     R = pose[:3, :3]
@@ -201,7 +207,7 @@ def merge_trajectories(plan_left, plan_right):
 
     return merged_trajectory
 
-def compute_pre_grasp_pose(grasp_pos, grasp_quat, approach_distance=0.1):
+def compute_pre_grasp_pose(grasp_pos, grasp_quat, approach_distance=0.05):
     # Convert quaternion to rotation matrix
     rotation = R.from_quat(grasp_quat).as_matrix()
 
