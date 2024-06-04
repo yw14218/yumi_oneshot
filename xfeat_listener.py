@@ -21,7 +21,7 @@ class ImageListener:
         self.last_time = time.time()
         self.fps = 0
         self.demo_rgb = cv2.imread(f"{dir}/demo_wrist_rgb.png")[...,::-1].copy()
-        self.demo_rgbs = np.tile(self.demo_rgb, (3, 1, 1, 1))
+        self.demo_rgbs = np.tile(self.demo_rgb, (2, 1, 1, 1))
         self.xfeat = torch.hub.load('verlab/accelerated_features', 'XFeat', pretrained = True, top_k = 2048)
         self.stable_point = stable_point
 
@@ -51,9 +51,9 @@ class ImageListener:
     
     def image_callback(self, data):
         
-        live_rgbs = np.empty((3, 480, 848, 3), dtype=np.uint8)
+        live_rgbs = np.empty((2, 480, 848, 3), dtype=np.uint8)
         try:
-            for i in range(3):
+            for i in range(2):
                 live_rgb = self.bridge.imgmsg_to_cv2(data, "rgb8")
                 live_rgbs[i] = live_rgb
         except CvBridgeError as e:
@@ -85,7 +85,7 @@ class ImageListener:
 
         print(time.time() - start)
         # Calculate Error
-        err = np.linalg.norm(np.array([X/3, Y/3]) - np.array(self.stable_point))
+        err = np.linalg.norm(np.array([X/2, Y/2]) - np.array(self.stable_point))
 
         # Calculate FPS
         current_time = time.time()
@@ -93,7 +93,7 @@ class ImageListener:
         self.last_time = current_time
         
         # Put texts on the image
-        cv2.circle(live_rgb, (int(X/3), int(Y/3)), 5, (0, 0, 255), 3)
+        cv2.circle(live_rgb, (int(X/2), int(Y/2)), 5, (0, 0, 255), 3)
         cv2.putText(live_rgb, f"FPS: {self.fps:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
         cv2.putText(live_rgb, f"ERROR: {err:.2f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
