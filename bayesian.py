@@ -48,9 +48,9 @@ class BayesianController:
         
         self.optimizer = BayesianOptimization(
             f=self.black_box_function,
-            pbounds={'delta_yaw': (-30, 30)},
+            pbounds={'delta_x': (-0.01, 0.01), 'delta_y': (-0.01, 0.01)},
             random_state=1,
-            bounds_transformer = SequentialDomainReductionTransformer(minimum_window=0.5),
+            # bounds_transformer = SequentialDomainReductionTransformer(minimum_window=0.5),
             verbose=2
         )
         self.utility = UtilityFunction(kind="ei", xi=1e-4)
@@ -132,7 +132,7 @@ class BayesianController:
         err = np.linalg.norm(predictions_np - np.array(self.compute_new_stable_point()))
         rospy.loginfo(f"mean: {mean}, variance: {variance}, error: {err}")
         
-        return -np.sum(variance), mean
+        return -np.sum(err), mean
 
     def optimize(self, iterations=100):
         start = time.time()
