@@ -23,6 +23,7 @@ class WoodExperiment(YuMiExperiment):
         """
         Move to the bottlenecks
         """
+
         left_pre_grasp_pose = compute_pre_grasp_pose(live_grasp_left[:3], live_grasp_left[3:]).tolist()
         right_pre_grasp_pose = compute_pre_grasp_pose(live_grasp_right[:3], live_grasp_right[3:]).tolist()
 
