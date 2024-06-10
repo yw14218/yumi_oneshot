@@ -645,8 +645,8 @@ def reset_init(arm=None):
     if arm is None:
         group_both.set_joint_value_target(safeJointPositionL + safeJointPositionR)
         group_both.go(wait=True)
-        # gripper_effort(LEFT, -15.0)
-        # gripper_effort(LEFT, 0.0)
+        gripper_effort(LEFT, -15.0)
+        gripper_effort(LEFT, 0.0)
         gripper_effort(RIGHT, -15.0)
         gripper_effort(RIGHT, 0.0)
     elif arm == LEFT:

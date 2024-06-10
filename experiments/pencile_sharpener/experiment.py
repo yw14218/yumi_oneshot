@@ -9,7 +9,7 @@ sys.path.append(parent_of_parent_dir)
 
 import yumi_moveit_utils as yumi
 from base_experiment import YuMiExperiment
-from trajectory_utils import compute_pre_grasp_pose
+from trajectory_utils import compute_pre_grasp_pose, merge_trajectories, align_trajectory_points
 
 class SharpenerExperiment(YuMiExperiment):
     
@@ -38,7 +38,7 @@ class SharpenerExperiment(YuMiExperiment):
         plan_right = yumi.group_r.retime_trajectory(yumi.robot.get_current_state(), plan_right, 0.02, 0.02)
         yumi.group_r.execute(plan_right)
         rospy.sleep(0.1)
-        yumi.gripper_effort(yumi.RIGHT, 2.5)
+        yumi.gripper_effort(yumi.RIGHT, 3.5)
         # rospy.sleep(0.1)
         # yumi.gripper_effort(yumi.RIGHT, 10)
         """
@@ -52,14 +52,21 @@ class SharpenerExperiment(YuMiExperiment):
         yumi.group_l.execute(plan_left)
 
         (plan_left, _) = yumi.group_l.compute_cartesian_path([yumi.create_pose(*insert_left_end)], 0.01, 0.0)
-        plan_left = yumi.group_l.retime_trajectory(yumi.robot.get_current_state(), plan_left, 1, 1)
-        yumi.group_l.execute(plan_left)
+        live_grasp_right[1] += 0.01
+        (plan_right, _) = yumi.group_r.compute_cartesian_path([yumi.create_pose(*live_grasp_right)], 0.01, 0.0)
+
+        plan_left, plan_right = align_trajectory_points(plan_left, plan_right)
+        merged_plan = merge_trajectories(plan_left, plan_right)
+        merged_plan = yumi.group_both.retime_trajectory(yumi.robot.get_current_state(), merged_plan, 3.5, 3.5)
+        yumi.group_both.execute(merged_plan)
+
+        # plan_left = yumi.group_l.retime_trajectory(yumi.robot.get_current_state(), plan_left, 2, 2)
+        # yumi.group_l.execute(plan_left)
+
 
         rospy.sleep(3)
 
-        yumi.open_grippers(yumi.LEFT)
-
-        yumi.reset_init(yumi.LEFT)
+        SharpenerExperiment.reset()
 
     @staticmethod
     def reset():
