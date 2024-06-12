@@ -22,6 +22,7 @@ from xfeat_listener import numpy_image_to_torch, decompose_homography
 from geometry_msgs.msg import geometry_msgs
 import yumi_moveit_utils as yumi
 import matplotlib.pyplot as plt
+from vis import *
 
 class ImageListener:
     def __init__(self, batch_size):
@@ -100,17 +101,17 @@ rospy.init_node('yumi_bayesian_controller', anonymous=True)
 
 publisher_left = rospy.Publisher("/yumi/joint_traj_pos_controller_l/command", JointTrajectory, queue_size=10)
 ik_solver_left = IKSolver(group_name="left_arm", ik_link_name="gripper_l_base")
-imageListener = ImageListener(batch_size=3)
+imageListener = ImageListener(batch_size=1)
 
-# DIR = "experiments/pencile_sharpener"
-# OBJ = "blue pencile sharpener"
+DIR = "experiments/pencile_sharpener"
+OBJ = "blue pencile sharpener"
 # from experiments.pencile_sharpener.experiment import SharpenerExperiment as Experiment
 
-DIR = "experiments/wood"
-OBJ = "wooden stand"
+# DIR = "experiments/wood"
+# OBJ = "wooden stand"
 from experiments.wood.experiment import WoodExperiment as Experiment
 
-T_GRIP_EEF = create_homogeneous_matrix([0, 0, 0.136], [0, 0, 0, 1])
+T_GRIP_EEF = create_homogeneous_matrix([-0.07, 0.08, 0.2], [0, 0, 0, 1])
 
 pose_estimator = PoseEstimation(
     dir=DIR,
@@ -125,7 +126,7 @@ demo_waypoints = np.vstack([dbn[key] for key in dbn.keys()])
 
 bottleneck_left = demo_waypoints[0].tolist()
 bottleneck_right = demo_waypoints[1].tolist()
-stab_pose = dbn["grasp_right"]
+stab_pose = dbn["bottleneck_left"]
 T_bottleneck_left = create_homogeneous_matrix(bottleneck_left[:3], bottleneck_left[3:])
 T_stab_pose = create_homogeneous_matrix(stab_pose[:3], stab_pose[3:])
 stab_3d_cam = get_current_stab_3d(T_EEF_World=T_bottleneck_left)
@@ -175,15 +176,16 @@ class PIDController:
         self.prev_error = error
         return self.Kp * error + self.Ki * self.integral + self.Kd * derivative
     
-def iterative_learning_control(demo_pixel, K, stab_3d_cam, max_iterations=50, threshold=0.9):
+def iterative_learning_control(demo_pixel, K, stab_3d_cam, max_iterations=1000, threshold=0.1):
     current_pose = yumi.get_current_pose(yumi.LEFT).pose
     current_rpy = euler_from_quat([current_pose.orientation.x, current_pose.orientation.y, current_pose.orientation.z, current_pose.orientation.w])
     control_input_x = 0
     control_input_y = 0
     errors = []
-    pid_x = PIDController(Kp=0.2, Ki=0.0, Kd=0.1)
-    pid_y = PIDController(Kp=0.2, Ki=0.0, Kd=0.1)
+    pid_x = PIDController(Kp=0.1, Ki=0.0, Kd=0.05)
+    pid_y = PIDController(Kp=0.1, Ki=0.0, Kd=0.05)
     pid_theta = PIDController(Kp=0.15, Ki=0.0, Kd=0.1)
+    trajectory = []
 
     for iteration in range(max_iterations):
         # Capture current image and detect projection pixel
@@ -195,6 +197,7 @@ def iterative_learning_control(demo_pixel, K, stab_3d_cam, max_iterations=50, th
         
         # Check if error is within threshold
         if (abs(delta_x) < threshold and abs(delta_y) < threshold) or iteration == max_iterations - 1:
+            print(abs(delta_x), abs(delta_y))
             # T_delta_world = yumi.get_curent_T_left() @ pose_inv(T_bottleneck_left)
             # live_waypoints = apply_transformation_to_waypoints(demo_waypoints, T_delta_world, project3D=True)
             # Experiment.replay(live_waypoints)
@@ -203,26 +206,29 @@ def iterative_learning_control(demo_pixel, K, stab_3d_cam, max_iterations=50, th
         delta_X = delta_x * stab_3d_cam[-1] / K[0][0]
         delta_Y = delta_y * stab_3d_cam[-1] / K[1][1]
 
-        error = np.linalg.norm(np.array([demo_pixel]) - np.array(current_pixel))
+        error = np.linalg.norm(np.array([demo_pixel]) - np.array(current_pixel), ord=1)
         errors.append(error)
 
         control_input_x = pid_x.update(delta_X)
         control_input_y = pid_y.update(delta_Y)
         control_input_z_rot = pid_theta.update(delta_theta)
 
-        rospy.loginfo(f"Step {iteration + 1}, Error is : {error:.4g}, delta_x: {control_input_x:.4g}, delta_y: {control_input_y:.4g}, delta_yaw: {np.degrees(control_input_z_rot)}")
-        
+        rospy.loginfo(f"Step {iteration + 1}, Error is : {error:.4g}, delta_x: {control_input_x:.4g}, delta_y: {control_input_y:.4g}, delta_yaw: {np.degrees(delta_theta)}")
+        rospy.loginfo(f"Step {iteration + 1}, Error is : {error:.4g}, delta_x: {t[0]:.4g}, delta_y: {t[1]:.4g}, delta_yaw: {np.degrees(delta_theta)}")
+
         # Move robot by the updated control input
         current_pose.position.x += control_input_x
         current_pose.position.y -= control_input_y
         # current_rpy[-1] -= control_input_z_rot
-        
+        trajectory.append([t[0], t[1], np.degrees(current_rpy[2])])
+
         new_pose = yumi.create_pose_euler(current_pose.position.x, current_pose.position.y, current_pose.position.z, current_rpy[0], current_rpy[1], current_rpy[2])
 
         move_eef(new_pose)
 
-    plt.plot(errors)
-    plt.show()
+    # plt.plot(errors)
+    # plt.show()
+    visualize_convergence_on_sphere(np.array(trajectory))
     return current_pose
 
 iterative_learning_control(demo_pixel=stab_point_2D, K=K, stab_3d_cam=stab_3d_cam)

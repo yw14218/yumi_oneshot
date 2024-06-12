@@ -25,7 +25,7 @@ def update(frame, trajectory, scatter, cmap, norm):
     return scatter,
 
 # Visualization function
-def visualize_convergence_on_sphere(trajectory, ground_truth):
+def visualize_convergence_on_sphere(trajectory):
     fig, ax = plt.subplots(figsize=(8, 6))
     setup_plot(ax)
     
@@ -37,16 +37,21 @@ def visualize_convergence_on_sphere(trajectory, ground_truth):
     y = r * np.outer(np.sin(u), np.sin(v))
     ax.plot(x, y, color='c', alpha=0.15)
 
+    # Adjust axis limits based on trajectory
+    ax.set_xlim(trajectory[:, 0].min(), trajectory[:, 0].max())
+    ax.set_ylim(trajectory[:, 1].min(), trajectory[:, 1].max())
+
     # Initialize scatter plot for trajectory points
-    scatter = ax.scatter([], [], color='blue', s=5)
+    scatter = ax.scatter([], [], color='blue', s=10)
 
     # Highlight the ground truth
-    ground_truth_coords = ground_truth[0], ground_truth[1]
-    ax.scatter(*ground_truth_coords, color='red', s=100, label='Ground Truth', edgecolor='red', facecolor='none')
+    # ground_truth_coords = ground_truth[0], ground_truth[1]
+    # ax.scatter(*ground_truth_coords, color='red', s=100, label='Ground Truth', edgecolor='red', facecolor='none')
 
     # Create colormap
     cmap = sns.color_palette("hsv", as_cmap=True, n_colors=3600)
     norm = Normalize(vmin=-180, vmax=180)
+
     # Create animation
     ani = FuncAnimation(fig, update, frames=len(trajectory), fargs=(trajectory, scatter, cmap, norm), interval=100, blit=True)
 
@@ -59,17 +64,17 @@ def visualize_convergence_on_sphere(trajectory, ground_truth):
     plt.legend()
     plt.show()
 
-# Ground truth pose (delta_x, delta_y, delta_yaw)
-ground_truth = np.array([0.5, -0.5, 5])
+# # Ground truth pose (delta_x, delta_y, delta_yaw)
+# ground_truth = np.array([0.5, -0.5, 5])
 
-# Initial prediction (delta_x, delta_y, delta_yaw)
-initial_pose = np.array([0, 0, 0])
+# # Initial prediction (delta_x, delta_y, delta_yaw)
+# initial_pose = np.array([0, 0, 0])
 
-# Generate the convergence trajectory
-trajectory = create_convergence_trajectory(initial_pose, ground_truth)
+# # Generate the convergence trajectory
+# trajectory = create_convergence_trajectory(initial_pose, ground_truth)
 
-# Visualize the convergence on the sphere
-visualize_convergence_on_sphere(trajectory, ground_truth)
+# # Visualize the convergence on the sphere
+# visualize_convergence_on_sphere(trajectory)
 
 
 
