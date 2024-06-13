@@ -9,11 +9,12 @@ sys.path.append(parent_of_parent_dir)
 
 import yumi_moveit_utils as yumi
 from base_experiment import YuMiExperiment
-from trajectory_utils import align_trajectory_points, merge_trajectories
+from trajectory_utils import align_trajectory_points, merge_trajectories, compute_pre_grasp_pose
 
 class WoodExperiment(YuMiExperiment):
     
-    def replay(self, live_waypoints):
+    @staticmethod
+    def replay(live_waypoints):
 
         live_bottleneck_left, live_bottleneck_right, \
         live_grasp_left, live_grasp_right, \
@@ -22,7 +23,11 @@ class WoodExperiment(YuMiExperiment):
         """
         Move to the bottlenecks
         """
-        yumi.plan_both_arms(live_bottleneck_left, live_bottleneck_right)
+
+        left_pre_grasp_pose = compute_pre_grasp_pose(live_grasp_left[:3], live_grasp_left[3:]).tolist()
+        right_pre_grasp_pose = compute_pre_grasp_pose(live_grasp_right[:3], live_grasp_right[3:]).tolist()
+
+        yumi.plan_both_arms(left_pre_grasp_pose, right_pre_grasp_pose)
 
         """
         Cartesian trajectories to reach the grasp pose
@@ -32,7 +37,7 @@ class WoodExperiment(YuMiExperiment):
 
         plan_left, plan_right = align_trajectory_points(plan_left, plan_right)
         merged_plan = merge_trajectories(plan_left, plan_right)
-        merged_plan = yumi.group_both.retime_trajectory(yumi.robot.get_current_state(), merged_plan, 0.5, 0.5)
+        merged_plan = yumi.group_both.retime_trajectory(yumi.robot.get_current_state(), merged_plan, 0.1, 0.1)
         yumi.group_both.execute(merged_plan)
 
         # yumi.group_r.execute(plan_right)
@@ -44,25 +49,29 @@ class WoodExperiment(YuMiExperiment):
         """
         Close the grippers simultaneously
         """
-        yumi.close_gripper_in_threads([yumi.LEFT, yumi.RIGHT])
-
-        rospy.sleep(0.1)
+        yumi.operate_gripper_in_threads([yumi.LEFT, yumi.RIGHT], close=True)
 
         """
         Lifting trajectories
         """
         yumi.plan_both_arms(live_lift_left, live_lift_right)
 
+    @staticmethod
+    def reset():
+        yumi.operate_gripper_in_threads(arms=[yumi.LEFT, yumi.RIGHT], close=False)
+        yumi.reset_init()
+
 if __name__ == '__main__':
     try:
         rospy.init_node('yumi_wood_experiment')
         yumi.init_Moveit()
 
-        MODE = "HEADCAM"
-        scissorExperiment = WoodExperiment("experiments/wood", "wood stand", MODE)
+        MODE = "REPLAY"
+        woodExperiment = WoodExperiment("experiments/wood", "wood stand", MODE)
         yumi.reset_init()
-        scissorExperiment.run()
+        woodExperiment.run()
         rospy.spin()
         
     except Exception as e:
         print(f"Error: {e}")
+        

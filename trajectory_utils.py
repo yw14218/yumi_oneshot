@@ -2,8 +2,8 @@ import copy
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation as R
-from moveit_commander import RobotTrajectory
-from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+# from moveit_commander import RobotTrajectory
+# from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 def filter_joint_states(joint_states, threshold):
     """
@@ -60,6 +60,12 @@ def quaternion_from_matrix(matrix):
     rotation_matrix = matrix[:3, :3]
     rotation = R.from_matrix(rotation_matrix)
     return rotation.as_quat()
+
+def euler_from_matrix(matrix):
+    """Extracts the euler from a 4x4 homogeneous transformation matrix."""
+    rotation_matrix = matrix[:3, :3]
+    rotation = R.from_matrix(rotation_matrix)
+    return rotation.as_euler("xyz")
 
 def pose_inv(pose):
     """Inverse a 4x4 homogeneous transformation matrix."""
@@ -200,3 +206,18 @@ def merge_trajectories(plan_left, plan_right):
         merged_trajectory.joint_trajectory.points.append(new_point)
 
     return merged_trajectory
+
+def compute_pre_grasp_pose(grasp_pos, grasp_quat, approach_distance=0.05):
+    # Convert quaternion to rotation matrix
+    rotation = R.from_quat(grasp_quat).as_matrix()
+
+    # Approach vector is the negative Z-axis of the end-effector in world frame
+    approach_vector = -rotation[:, 2]
+
+    # Compute the pre-grasp position
+    pre_grasp_pos = grasp_pos + approach_vector * approach_distance
+
+    # Pre-grasp orientation is the same as grasp orientation
+    pre_grasp_quat = grasp_quat
+
+    return np.concatenate([pre_grasp_pos, pre_grasp_quat])

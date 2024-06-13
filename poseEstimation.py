@@ -7,7 +7,7 @@ import copy
 from sensor_msgs.msg import Image as ImageMsg
 from PoseEst.direct.preprocessor import Preprocessor, pose_inv, SceneData
 from langSAM import LangSAMProcessor
-from trajectory_utils import create_homogeneous_matrix
+from trajectory_utils import create_homogeneous_matrix, euler_from_matrix
 
 class PoseEstimation:
     def __init__(self, dir, text_prompt, visualize):
@@ -81,7 +81,7 @@ class PoseEstimation:
         return rgb_image, depth_image, mask_image
 
 
-    def process_data(self, rgb_image, depth_image, mask_image, camera_prefix):
+    def process_data(self, rgb_image, depth_image, mask_image, camera_prefix, T_WC=np.eye(4)):
 
         if camera_prefix == "d415":
             demo_rgb = np.array(Image.open(self.demo_head_rgb_path))
@@ -107,7 +107,7 @@ class PoseEstimation:
             seg_1=live_mask,
             intrinsics_0=intrinsics,
             intrinsics_1=intrinsics,
-            T_WC=np.eye(4)  # cam frame
+            T_WC=T_WC
         )
 
         processor = Preprocessor()
@@ -115,15 +115,6 @@ class PoseEstimation:
         return data
 
     def estimate_pose(self, data, camera_prefix):
-
-        # Function to draw registration results
-        def draw_registration_result(source, target, transformation):
-            source_temp = copy.deepcopy(source)
-            target_temp = copy.deepcopy(target)
-            source_temp.transform(transformation)
-            source_temp.paint_uniform_color([1, 0.706, 0])
-            target_temp.paint_uniform_color([0, 0.651, 0.929])
-            o3d.visualization.draw_geometries([source_temp, target_temp])
 
         pcd0 = o3d.geometry.PointCloud()
         pcd1 = o3d.geometry.PointCloud()
@@ -222,11 +213,60 @@ class PoseEstimation:
         rgb_image, depth_image, mask_image = self.inference_and_save(camera_prefix, output_path)
         data = self.process_data(rgb_image, depth_image, mask_image, camera_prefix)
         
-        # if camera_prefix == 'd415':
-        #     return np.mean(data["pc1"][:, :3], axis=0) - np.mean(data["pc0"][:, :3], axis=0) 
-        
         return self.estimate_pose(data, camera_prefix)
 
+    def decouple_run(self, output_path, camera_prefix):
+        rgb_image, depth_image, mask_image = self.inference_and_save(camera_prefix, output_path)
+        data = self.process_data(rgb_image, depth_image, mask_image, camera_prefix, T_WC = np.load(self.T_WC_path))
+
+        pcd0 = o3d.geometry.PointCloud()
+        pcd0.points = o3d.utility.Vector3dVector(data["pc0"][:, :3])
+        pcd1 = o3d.geometry.PointCloud()
+        pcd1.points = o3d.utility.Vector3dVector(data["pc1"][:, :3])
+        pcd0_centre = np.mean(data["pc0"][:, :3], axis=0)  
+        pcd1_centre = np.mean(data["pc1"][:, :3], axis=0)
+
+        # Compute the difference between the centroids
+        diff_xyz = pcd1_centre - pcd0_centre
+
+        # Compute FPFH features
+        voxel_size = 0.01 # Set voxel size for downsampling (adjust based on your data)
+
+        source_down = pcd0.voxel_down_sample(voxel_size)
+        target_down = pcd1.voxel_down_sample(voxel_size)
+
+        source_down.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 2, max_nn=30))
+        target_down.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 2, max_nn=30))
+
+        source_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
+            source_down,
+            o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 5, max_nn=100))
+
+        target_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
+            target_down,
+            o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 5, max_nn=100))
+    
+        # Global registration using FGR
+        distance_threshold = voxel_size * 0.5
+        result = o3d.pipelines.registration.registration_fgr_based_on_feature_matching(
+            source_down, target_down, source_fpfh, target_fpfh,
+            o3d.pipelines.registration.FastGlobalRegistrationOption(
+                maximum_correspondence_distance=distance_threshold))
+
+        # Use the result of global registration as the initial transformation for ICP
+        trans_init = result.transformation
+        
+        threshold = 0.01  # Set a threshold for ICP, this depends on your data
+        reg_p2p = o3d.pipelines.registration.registration_icp(
+            pcd0, pcd1, threshold, trans_init,
+            o3d.pipelines.registration.TransformationEstimationPointToPoint())
+
+        # Get the transformation matrix
+        T_delta_world = reg_p2p.transformation      
+        diff_rpy = euler_from_matrix(T_delta_world.copy()).copy()
+
+        return diff_xyz, diff_rpy
+    
     def run_image_match(self, output_path, camera_prefix):
         import torch
         import cv2
@@ -276,8 +316,7 @@ class PoseEstimation:
         plt.imshow(canvas[..., ::-1]), plt.show()
 
         K = np.load(self.intrinsics_d415_path)
-        T_WC = np.load(self.T_WC_path
-                       )
+        T_WC = np.load(self.T_WC_path)
         def image_to_world(points, K, T_WC, depth=1.0):
             K_inv = np.linalg.inv(K)
             points_hom = np.hstack((points, np.ones((points.shape[0], 1))))
@@ -299,11 +338,12 @@ class PoseEstimation:
 
 if __name__ == '__main__':
     rospy.init_node('PoseEstimation', anonymous=True)
-    dir = "experiments/lego_split"
+    dir = "experiments/scissor"
 
     pose_estimator = PoseEstimation(
         dir=dir,
-        text_prompt="lego",
+        text_prompt="black scissor",
+        visualize=False
     )
     try:
         T_delta_world = pose_estimator.run(output_path=f"{dir}/", camera_prefix="d415")
