@@ -145,7 +145,7 @@ template_mask = cv2.threshold(demo_seg, 127, 255, cv2.THRESH_BINARY)[1]
 
 yumi.init_Moveit()
 
-yumi.reset_init()
+# yumi.reset_init()
 yumi.plan_left_arm(yumi.create_pose(*bottleneck_left))
 user_input = input("Continue? (yes/no): ").lower()
 if user_input == "ready":
@@ -215,15 +215,15 @@ def iterative_learning_control(demo_pixel, K, stab_3d_cam, max_iterations=100, t
         control_input_x = pid_x.update(delta_X)
         control_input_y = pid_y.update(delta_Y)
         control_input_z_rot = pid_theta.update(delta_theta)
-
+        if abs(control_input_z_rot) >= 0.02:
+            control_input_z_rot = 0.02 if control_input_z_rot > 0 else -0.02
         rospy.loginfo(f"Step {iteration + 1}, Error is : {error:.4g}, delta_x: {control_input_x:.4g}, delta_y: {control_input_y:.4g}, delta_yaw: {np.degrees(delta_theta)}")
     
         # Move robot by the updated control input
         current_pose.position.x += control_input_x
         current_pose.position.y -= control_input_y
-        # current_rpy[-1] -= control_input_z_rot
-        if iteration == 0:
-                current_rpy[-1] -= np.radians(-66.46)
+        current_rpy[-1] -= control_input_z_rot
+        
         trajectory.append([current_pose.position.x, current_pose.position.y, np.degrees(current_rpy[-1])])
 
         new_pose = yumi.create_pose_euler(current_pose.position.x, current_pose.position.y, current_pose.position.z, current_rpy[0], current_rpy[1], current_rpy[2])
