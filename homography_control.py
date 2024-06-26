@@ -40,6 +40,8 @@ class ImageListener:
                 if len(self.live_rgb_batch) == self.batch_size:
                     self.image_event.set()
 
+
+
     def observe(self):
         with self.lock:
             self.live_rgb_batch = []
@@ -53,8 +55,12 @@ class ImageListener:
             raise NotImplementedError
 
         with self.lock:
-            points = []
-            rotations = []
+            dx = 0
+            dy = 0
+            dyaw = 0
+            dscale = 0
+            # rotations = []
+            # scales = []
             for live_rgb in self.live_rgb_batch:
                 feats0, feats1, matches01 = match_pair(extractor, matcher, demo_rgb_cuda, numpy_image_to_torch(live_rgb))
                 matches = matches01['matches']  # indices with shape (K,2)
@@ -63,19 +69,24 @@ class ImageListener:
 
                 try:
                     H, _ = cv2.findHomography(mkpts_0, mkpts_1, cv2.USAC_MAGSAC, 5.0)
-                    x, y = cv2.perspectiveTransform(stab_point_2D_np, H)[0][0]
-                    points.append((x, y))
-                    rotations.append(np.arctan2(H[1, 0], H[0, 0]))
+                    dx, dy = cv2.perspectiveTransform(stab_point_2D_np, H)[0][0]            
+                    dyaw = np.arctan2(H[1, 0], H[0, 0])
+                    H /= H[2, 2]
+                    # Compute the scale (delta_Z) directly from the 2x2 upper-left submatrix
+                    dscale = np.linalg.norm(H[:2, :2], ord='fro')
                 except cv2.error:
                     pass
 
-            points = np.array(points)
-            rotations = np.array(rotations)
-            med_idx = np.argsort(points[:, 0])[len(points) // 2]
-            median_x, median_y = points[med_idx]
-            median_theta = np.median(rotations)
+            # points = np.array(points)
+            # rotations = np.array(rotations)
+            # scales = np.array(scales)
+            # med_idx = np.argsort(points[:, 0])[len(points) // 2]
+            # median_x, median_y = points[med_idx]
+            # median_theta = np.median(rotations)
 
-            return (median_x, median_y), median_theta
+            # return (median_x, median_y), median_theta
+
+            return (dx, dy), dyaw, dscale
 
 def get_current_stab_3d(T_EEF_World):
     stab_point3d = pose_inv(T_EEF_World @ T_C_EEF) @ T_stab_pose @ T_GRIP_EEF
@@ -146,6 +157,7 @@ template_mask = cv2.threshold(demo_seg, 127, 255, cv2.THRESH_BINARY)[1]
 yumi.init_Moveit()
 
 # yumi.reset_init()
+# bottleneck_left[2] += 0.1
 yumi.plan_left_arm(yumi.create_pose(*bottleneck_left))
 user_input = input("Continue? (yes/no): ").lower()
 if user_input == "ready":
@@ -179,7 +191,7 @@ class PIDController:
         self.prev_error = error
         return self.Kp * error + self.Ki * self.integral + self.Kd * derivative
     
-def iterative_learning_control(demo_pixel, K, stab_3d_cam, max_iterations=100, threshold=0.1):
+def iterative_learning_control(demo_pixel, K, stab_3d_cam, max_iterations=200, threshold=0.1):
     current_pose = yumi.get_current_pose(yumi.LEFT).pose
     current_rpy = euler_from_quat([current_pose.orientation.x, current_pose.orientation.y, current_pose.orientation.z, current_pose.orientation.w])
     control_input_x = 0
@@ -188,11 +200,12 @@ def iterative_learning_control(demo_pixel, K, stab_3d_cam, max_iterations=100, t
     pid_x = PIDController(Kp=0.15, Ki=0.0, Kd=0.05)
     pid_y = PIDController(Kp=0.15, Ki=0.0, Kd=0.05)
     pid_theta = PIDController(Kp=0.05, Ki=0.0, Kd=0.01)
+    pid_z = PIDController(Kp=0.05, Ki=0.0, Kd=0.01)
     trajectory = []
 
     for iteration in range(max_iterations):
         # Capture current image and detect projection pixel
-        current_pixel, delta_theta = imageListener.observe()
+        current_pixel, delta_theta, delta_z = imageListener.observe()
         
         # Calculate pixel error
         delta_x = demo_pixel[0] - current_pixel[0]
@@ -215,13 +228,25 @@ def iterative_learning_control(demo_pixel, K, stab_3d_cam, max_iterations=100, t
         control_input_x = pid_x.update(delta_X)
         control_input_y = pid_y.update(delta_Y)
         control_input_z_rot = pid_theta.update(delta_theta)
+        print("!!!", delta_z)
+        control_input_z = pid_z.update(delta_z) * 0.01
+        
+
+        if abs(control_input_x) >= 0.002:
+            control_input_x = 0.002 if control_input_x > 0 else -0.002
+        if abs(control_input_y) >= 0.002:
+            control_input_y = 0.002 if control_input_y > 0 else -0.002
         if abs(control_input_z_rot) >= 0.02:
             control_input_z_rot = 0.02 if control_input_z_rot > 0 else -0.02
-        rospy.loginfo(f"Step {iteration + 1}, Error is : {error:.4g}, delta_x: {control_input_x:.4g}, delta_y: {control_input_y:.4g}, delta_yaw: {np.degrees(delta_theta)}")
+        if abs(control_input_z) >= 0.002:
+            control_input_z = 0.002 if control_input_z_rot > 0 else -0.002
+
+        rospy.loginfo(f"Step {iteration + 1}, Error is : {error:.4g}, delta_x: {control_input_x:.4g}, delta_y: {control_input_y:.4g}, delta_yaw: {np.degrees(delta_theta)}, delta_z: {control_input_z:.4g}")
     
         # Move robot by the updated control input
         current_pose.position.x += control_input_x
         current_pose.position.y -= control_input_y
+        # current_pose.position.z -= control_input_z
         current_rpy[-1] -= control_input_z_rot
         
         trajectory.append([current_pose.position.x, current_pose.position.y, np.degrees(current_rpy[-1])])
@@ -230,9 +255,8 @@ def iterative_learning_control(demo_pixel, K, stab_3d_cam, max_iterations=100, t
 
         move_eef(new_pose)
 
-    # plt.plot(errors)
-    # plt.show()
     visualize_convergence_on_sphere(np.array(trajectory))
+    
     return current_pose
 
 iterative_learning_control(demo_pixel=stab_point_2D, K=K, stab_3d_cam=stab_3d_cam)
