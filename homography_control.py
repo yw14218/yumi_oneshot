@@ -18,11 +18,11 @@ from camera_utils import convert_from_uvd, d405_K as K, d405_T_C_EEF as T_C_EEF
 from matplotlib import pyplot as plt
 from matplotlib import gridspec
 from lightglue import LightGlue, SuperPoint, match_pair
-from xfeat_listener import numpy_image_to_torch, decompose_homography
 from geometry_msgs.msg import geometry_msgs
 import yumi_moveit_utils as yumi
 import matplotlib.pyplot as plt
 from vis import *
+from collections import deque
 
 class ImageListener:
     def __init__(self, batch_size):
@@ -32,6 +32,7 @@ class ImageListener:
         self.image_event = Event()
         self.lock = Lock()
         self.subscriber = rospy.Subscriber("d405/color/image_rect_raw", Image, self.image_callback)
+        self.homography_buffer = deque(maxlen=3)
 
     def image_callback(self, msg):
         with self.lock:
@@ -40,16 +41,67 @@ class ImageListener:
                 if len(self.live_rgb_batch) == self.batch_size:
                     self.image_event.set()
 
+    @staticmethod
+    def numpy_image_to_torch(image: np.ndarray) -> torch.Tensor:
+        """Normalize the image tensor and reorder the dimensions."""
+        if image.ndim == 3:
+            image = image.transpose((2, 0, 1))  # HxWxC to CxHxW
+        elif image.ndim == 2:
+            image = image[None]  # add channel axis
+        else:
+            raise ValueError(f"Not an image: {image.shape}")
+        return torch.tensor(image / 255.0, dtype=torch.float, device="cuda")
 
+    @staticmethod
+    def normalize_points(points, K):
+        K_inv = np.linalg.inv(K)
+        return (K_inv @ np.hstack((points, np.ones((points.shape[0], 1)))).T).T[:, :2]
+
+    @staticmethod
+    def select_best_decomposition(decompositions):
+        Rs, ts, normals = decompositions[1], decompositions[2], decompositions[3]
+        best_index = -1
+        best_score = float('inf')
+
+        for i, (R, t, n) in enumerate(zip(Rs, ts, normals)):
+            # # Heuristic 1: Check the magnitude of the translation vector (consider all components)
+            # translation_magnitude = np.linalg.norm(t)
+
+            # # Heuristic 2: Ensure the normal is close to [0, 0, 1]
+            # normal_deviation = np.linalg.norm(n - np.array([0, 0, 1]))
+
+            # Heuristic 3: Check the rotation matrix (for dominant yaw)
+            yaw = np.arctan2(R[1, 0], R[0, 0])
+            pitch = np.arctan2(-R[2, 0], np.sqrt(R[2, 1]**2 + R[2, 2]**2))
+            roll = np.arctan2(R[2, 1], R[2, 2])
+
+            # Ideally, pitch and roll should be small in a top-down view
+            rotation_score = np.abs(pitch) + np.abs(roll)
+
+            # Combine heuristics into a single score
+            score = rotation_score
+
+            if score < best_score:
+                best_score = score
+                best_index = i
+
+        if best_index != -1:
+            best_R = Rs[best_index]
+            best_t = ts[best_index]
+            best_normal = normals[best_index]
+        else:
+            print("No valid decomposition found.")
+
+        return Rotation.from_matrix(best_R).as_euler('xyz'), best_t
 
     def observe(self):
         with self.lock:
             self.live_rgb_batch = []
         self.image_event.clear()
-        
+
         # Wait for batch_size images to be collected or timeout
         collected = self.image_event.wait(1)
-        
+
         if not collected:
             rospy.logwarn("Timeout occurred while waiting for images.")
             raise NotImplementedError
@@ -57,36 +109,29 @@ class ImageListener:
         with self.lock:
             dx = 0
             dy = 0
-            dyaw = 0
-            dscale = 0
-            # rotations = []
-            # scales = []
+            drz = 0
             for live_rgb in self.live_rgb_batch:
-                feats0, feats1, matches01 = match_pair(extractor, matcher, demo_rgb_cuda, numpy_image_to_torch(live_rgb))
+                feats0, feats1, matches01 = match_pair(extractor, matcher, demo_rgb_cuda, self.numpy_image_to_torch(live_rgb))
                 matches = matches01['matches']  # indices with shape (K,2)
                 mkpts_0 = feats0['keypoints'][matches[..., 0]].cpu().numpy()  # coordinates in image #0, shape (K,2)
                 mkpts_1 = feats1['keypoints'][matches[..., 1]].cpu().numpy()  # coordinates in image #1, shape (K,2)
 
+                # Normalize your points
+                mkpts_0_norm = self.normalize_points(mkpts_0, K)
+                mkpts_1_norm = self.normalize_points(mkpts_1, K)
+
                 try:
-                    H, _ = cv2.findHomography(mkpts_0, mkpts_1, cv2.USAC_MAGSAC, 5.0)
-                    dx, dy = cv2.perspectiveTransform(stab_point_2D_np, H)[0][0]            
-                    dyaw = np.arctan2(H[1, 0], H[0, 0])
-                    H /= H[2, 2]
-                    # Compute the scale (delta_Z) directly from the 2x2 upper-left submatrix
-                    dscale = np.linalg.norm(H[:2, :2], ord='fro')
+                    H_norm, _ = cv2.findHomography(mkpts_0_norm, mkpts_1_norm, cv2.USAC_MAGSAC, 0.001, confidence=0.99999)
+                    if H_norm is not None:
+                        H = K @ H_norm @ np.linalg.inv(K)
+                        dx, dy = cv2.perspectiveTransform(stab_point_2D_np, H)[0][0]
+                        decompositions = cv2.decomposeHomographyMat(H_norm, np.eye(3))
+                        best_R, best_t = self.select_best_decomposition(decompositions)
+                        drz = best_R[-1]
                 except cv2.error:
                     pass
 
-            # points = np.array(points)
-            # rotations = np.array(rotations)
-            # scales = np.array(scales)
-            # med_idx = np.argsort(points[:, 0])[len(points) // 2]
-            # median_x, median_y = points[med_idx]
-            # median_theta = np.median(rotations)
-
-            # return (median_x, median_y), median_theta
-
-            return (dx, dy), dyaw, dscale
+            return (dx, dy), drz
 
 def get_current_stab_3d(T_EEF_World):
     stab_point3d = pose_inv(T_EEF_World @ T_C_EEF) @ T_stab_pose @ T_GRIP_EEF
@@ -111,7 +156,7 @@ rospy.init_node('yumi_bayesian_controller', anonymous=True)
 
 publisher_left = rospy.Publisher("/yumi/joint_traj_pos_controller_l/command", JointTrajectory, queue_size=10)
 ik_solver_left = IKSolver(group_name="left_arm", ik_link_name="gripper_l_base")
-imageListener = ImageListener(batch_size=3)
+imageListener = ImageListener(batch_size=1)
 
 DIR = "experiments/pencile_sharpener"
 OBJ = "blue pencile sharpener"
@@ -151,14 +196,19 @@ extractor = SuperPoint(max_num_keypoints=1024).eval().cuda()  # load the extract
 matcher = LightGlue(features='superpoint', depth_confidence=-1, width_confidence=-1).eval().cuda()  # load the matcher
 demo_rgb = cv2.imread(f"{DIR}/demo_wrist_rgb.png")[..., ::-1].copy() 
 demo_seg = cv2.imread(f"{DIR}/demo_wrist_seg.png")
-demo_rgb_cuda = numpy_image_to_torch(demo_rgb * demo_seg.astype(bool))
-template_mask = cv2.threshold(demo_seg, 127, 255, cv2.THRESH_BINARY)[1]
+demo_rgb_cuda = imageListener.numpy_image_to_torch(demo_rgb * demo_seg.astype(bool))
 
 yumi.init_Moveit()
 
 # yumi.reset_init()
-# bottleneck_left[2] += 0.1
 yumi.plan_left_arm(yumi.create_pose(*bottleneck_left))
+# unit = 0.03*3
+# current_rpy = euler_from_quat([bottleneck_left[3], bottleneck_left[4], bottleneck_left[5], bottleneck_left[6]])
+# current_rpy[-1] += np.radians(15)
+# bottleneck_left[0] += unit
+# bottleneck_left[1] += unit
+# bottleneck_left[2] += unit 
+# yumi.plan_left_arm(yumi.create_pose_euler(bottleneck_left[0], bottleneck_left[1], bottleneck_left[2], current_rpy[0], current_rpy[1], current_rpy[2]))
 user_input = input("Continue? (yes/no): ").lower()
 if user_input == "ready":
     pass
@@ -197,15 +247,15 @@ def iterative_learning_control(demo_pixel, K, stab_3d_cam, max_iterations=200, t
     control_input_x = 0
     control_input_y = 0
     errors = []
-    pid_x = PIDController(Kp=0.15, Ki=0.0, Kd=0.05)
-    pid_y = PIDController(Kp=0.15, Ki=0.0, Kd=0.05)
-    pid_theta = PIDController(Kp=0.05, Ki=0.0, Kd=0.01)
+    pid_x = PIDController(Kp=0.05, Ki=0.0, Kd=0.01)
+    pid_y = PIDController(Kp=0.05, Ki=0.0, Kd=0.01)
+    pid_theta = PIDController(Kp=0.1, Ki=0.0, Kd=0.02)
     pid_z = PIDController(Kp=0.05, Ki=0.0, Kd=0.01)
     trajectory = []
 
     for iteration in range(max_iterations):
         # Capture current image and detect projection pixel
-        current_pixel, delta_theta, delta_z = imageListener.observe()
+        current_pixel, delta_rz = imageListener.observe()
         
         # Calculate pixel error
         delta_x = demo_pixel[0] - current_pixel[0]
@@ -227,9 +277,8 @@ def iterative_learning_control(demo_pixel, K, stab_3d_cam, max_iterations=200, t
 
         control_input_x = pid_x.update(delta_X)
         control_input_y = pid_y.update(delta_Y)
-        control_input_z_rot = pid_theta.update(delta_theta)
-        print("!!!", delta_z)
-        control_input_z = pid_z.update(delta_z) * 0.01
+        control_input_z_rot = pid_theta.update(delta_rz)
+        # control_input_z = pid_z.update(delta_z) * 0.01
         
 
         if abs(control_input_x) >= 0.002:
@@ -238,10 +287,10 @@ def iterative_learning_control(demo_pixel, K, stab_3d_cam, max_iterations=200, t
             control_input_y = 0.002 if control_input_y > 0 else -0.002
         if abs(control_input_z_rot) >= 0.02:
             control_input_z_rot = 0.02 if control_input_z_rot > 0 else -0.02
-        if abs(control_input_z) >= 0.002:
-            control_input_z = 0.002 if control_input_z_rot > 0 else -0.002
+        # if abs(control_input_z) >= 0.002:
+        #     control_input_z = 0.002 if control_input_z_rot > 0 else -0.002
 
-        rospy.loginfo(f"Step {iteration + 1}, Error is : {error:.4g}, delta_x: {control_input_x:.4g}, delta_y: {control_input_y:.4g}, delta_yaw: {np.degrees(delta_theta)}, delta_z: {control_input_z:.4g}")
+        rospy.loginfo(f"Step {iteration + 1}, Error is : {error:.4g}, delta_x: {control_input_x:.4g}, delta_y: {control_input_y:.4g}, delta_yaw: {np.degrees(delta_rz)}")
     
         # Move robot by the updated control input
         current_pose.position.x += control_input_x
