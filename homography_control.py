@@ -110,6 +110,7 @@ class ImageListener:
             dx = 0
             dy = 0
             drz = 0
+            dz = 0
             for live_rgb in self.live_rgb_batch:
                 feats0, feats1, matches01 = match_pair(extractor, matcher, demo_rgb_cuda, self.numpy_image_to_torch(live_rgb))
                 matches = matches01['matches']  # indices with shape (K,2)
@@ -128,10 +129,17 @@ class ImageListener:
                         decompositions = cv2.decomposeHomographyMat(H_norm, np.eye(3))
                         best_R, best_t = self.select_best_decomposition(decompositions)
                         drz = best_R[-1]
+                        # Compute the determinant of H
+                        det_H = np.linalg.det(H)
+                        # Compute the ratio Z/Z*
+                        # Note: Z/Z* = (det(H))^(-1/3)
+                        Z_ratio = det_H ** (-1/3)
+                        # Compute the error using natural logarithm
+                        dz = np.log(Z_ratio)
                 except cv2.error:
                     pass
 
-            return (dx, dy), drz
+            return (dx, dy), drz, dz
 
 def get_current_stab_3d(T_EEF_World):
     stab_point3d = pose_inv(T_EEF_World @ T_C_EEF) @ T_stab_pose @ T_GRIP_EEF
@@ -201,14 +209,8 @@ demo_rgb_cuda = imageListener.numpy_image_to_torch(demo_rgb * demo_seg.astype(bo
 yumi.init_Moveit()
 
 # yumi.reset_init()
+bottleneck_left[2] += 0.05
 yumi.plan_left_arm(yumi.create_pose(*bottleneck_left))
-# unit = 0.03*3
-# current_rpy = euler_from_quat([bottleneck_left[3], bottleneck_left[4], bottleneck_left[5], bottleneck_left[6]])
-# current_rpy[-1] += np.radians(15)
-# bottleneck_left[0] += unit
-# bottleneck_left[1] += unit
-# bottleneck_left[2] += unit 
-# yumi.plan_left_arm(yumi.create_pose_euler(bottleneck_left[0], bottleneck_left[1], bottleneck_left[2], current_rpy[0], current_rpy[1], current_rpy[2]))
 user_input = input("Continue? (yes/no): ").lower()
 if user_input == "ready":
     pass
@@ -250,13 +252,14 @@ def iterative_learning_control(demo_pixel, K, stab_3d_cam, max_iterations=200, t
     pid_x = PIDController(Kp=0.05, Ki=0.0, Kd=0.01)
     pid_y = PIDController(Kp=0.05, Ki=0.0, Kd=0.01)
     pid_theta = PIDController(Kp=0.1, Ki=0.0, Kd=0.02)
-    pid_z = PIDController(Kp=0.05, Ki=0.0, Kd=0.01)
+    pid_z = PIDController(Kp=0.5, Ki=0.0, Kd=0.1)
     trajectory = []
 
     for iteration in range(max_iterations):
         # Capture current image and detect projection pixel
-        current_pixel, delta_rz = imageListener.observe()
+        current_pixel, delta_rz, delta_z = imageListener.observe()
         
+        print(delta_z)
         # Calculate pixel error
         delta_x = demo_pixel[0] - current_pixel[0]
         delta_y = demo_pixel[1] - current_pixel[1]
@@ -278,24 +281,24 @@ def iterative_learning_control(demo_pixel, K, stab_3d_cam, max_iterations=200, t
         control_input_x = pid_x.update(delta_X)
         control_input_y = pid_y.update(delta_Y)
         control_input_z_rot = pid_theta.update(delta_rz)
-        # control_input_z = pid_z.update(delta_z) * 0.01
+        control_input_z = pid_z.update(delta_z)
         
 
-        if abs(control_input_x) >= 0.002:
-            control_input_x = 0.002 if control_input_x > 0 else -0.002
-        if abs(control_input_y) >= 0.002:
-            control_input_y = 0.002 if control_input_y > 0 else -0.002
-        if abs(control_input_z_rot) >= 0.02:
-            control_input_z_rot = 0.02 if control_input_z_rot > 0 else -0.02
-        # if abs(control_input_z) >= 0.002:
-        #     control_input_z = 0.002 if control_input_z_rot > 0 else -0.002
+        # if abs(control_input_x) >= 0.002:
+        #     control_input_x = 0.002 if control_input_x > 0 else -0.002
+        # if abs(control_input_y) >= 0.002:
+        #     control_input_y = 0.002 if control_input_y > 0 else -0.002
+        # if abs(control_input_z_rot) >= 0.02:
+        #     control_input_z_rot = 0.02 if control_input_z_rot > 0 else -0.02
+        if abs(control_input_z) >= 0.001:
+            control_input_z = 0.001 if control_input_z > 0 else -0.001
 
-        rospy.loginfo(f"Step {iteration + 1}, Error is : {error:.4g}, delta_x: {control_input_x:.4g}, delta_y: {control_input_y:.4g}, delta_yaw: {np.degrees(delta_rz)}")
+        rospy.loginfo(f"Step {iteration + 1}, Error is : {error:.4g}, delta_x: {control_input_x:.4g}, delta_y: {control_input_y:.4g}, delta_z: {control_input_z:.4g}, delta_yaw: {np.degrees(delta_rz)}")
     
         # Move robot by the updated control input
         current_pose.position.x += control_input_x
         current_pose.position.y -= control_input_y
-        # current_pose.position.z -= control_input_z
+        current_pose.position.z -= control_input_z
         current_rpy[-1] -= control_input_z_rot
         
         trajectory.append([current_pose.position.x, current_pose.position.y, np.degrees(current_rpy[-1])])
