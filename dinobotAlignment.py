@@ -98,6 +98,18 @@ class DINOBotAlignment:
 
         return xyz + quaternion
 
+    def extract_descriptors(self, image_1_path, image_2_path):
+        with torch.no_grad():
+            points1, points2, image1_pil, image2_pil, \
+            patches_xy, desc1, desc2, num_patches = find_correspondences(image_1_path, image_2_path, self.num_pairs, self.load_size, self.layer,
+                                                                        self.facet, self.bin, self.thresh, self.model_type, self.stride,
+                                                                        return_patches_x_y = True)
+            desc1 = desc1.reshape((num_patches[0],num_patches[1], 6528))
+            descriptor_vectors = desc1[patches_xy[0], patches_xy[1]]
+            print("num patches", num_patches)
+
+            return patches_xy, desc1, descriptor_vectors, num_patches
+    
     def run(self, rgb_live_path, depth_live_path):
         rgb_bn_path = "{0}/demo_wrist_rgb.png".format(self.DIR) 
         depth_bn_path = "{0}/demo_wrist_depth.png".format(self.DIR)
@@ -106,7 +118,7 @@ class DINOBotAlignment:
 
         with torch.no_grad():
             points1, points2, image1_pil, image2_pil = find_correspondences(rgb_bn_path, rgb_live_path, self.num_pairs, self.load_size, self.layer,
-                                                                            self.facet, self.bin, self.thresh, self.model_type, self.stride)
+                                                                             self.facet, self.bin, self.thresh, self.model_type, self.stride)
         if self.show_plots:
             fig_1, ax1 = plt.subplots()
             ax1.axis('off')
