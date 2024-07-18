@@ -37,7 +37,7 @@ class WoodExperiment(YuMiExperiment):
 
         plan_left, plan_right = align_trajectory_points(plan_left, plan_right)
         merged_plan = merge_trajectories(plan_left, plan_right)
-        merged_plan = yumi.group_both.retime_trajectory(yumi.robot.get_current_state(), merged_plan, 0.1, 0.1)
+        merged_plan = yumi.group_both.retime_trajectory(yumi.robot.get_current_state(), merged_plan, 0.2, 0.2)
         yumi.group_both.execute(merged_plan)
 
         # yumi.group_r.execute(plan_right)
@@ -55,6 +55,8 @@ class WoodExperiment(YuMiExperiment):
         Lifting trajectories
         """
         yumi.plan_both_arms(live_lift_left, live_lift_right)
+
+        WoodExperiment.reset()
 
     @staticmethod
     def reset():

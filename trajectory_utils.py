@@ -2,8 +2,9 @@ import copy
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation as R
-# from moveit_commander import RobotTrajectory
-# from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+from moveit_commander import RobotTrajectory
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+from geometry_msgs.msg import geometry_msgs
 
 def filter_joint_states(joint_states, threshold):
     """
@@ -66,6 +67,9 @@ def euler_from_matrix(matrix):
     rotation_matrix = matrix[:3, :3]
     rotation = R.from_matrix(rotation_matrix)
     return rotation.as_euler("xyz")
+
+def euler_from_quat(quat, seg='xyz'):
+    return R.from_quat(quat).as_euler('xyz')
 
 def pose_inv(pose):
     """Inverse a 4x4 homogeneous transformation matrix."""
@@ -221,3 +225,36 @@ def compute_pre_grasp_pose(grasp_pos, grasp_quat, approach_distance=0.05):
     pre_grasp_quat = grasp_quat
 
     return np.concatenate([pre_grasp_pos, pre_grasp_quat])
+
+def create_pose(x_p, y_p, z_p, x_o, y_o, z_o, w_o):
+    """Creates a pose using quaternions
+
+    Creates a pose for use with MoveIt! using XYZ coordinates and XYZW
+    quaternion values
+
+    :param x_p: The X-coordinate for the pose
+    :param y_p: The Y-coordinate for the pose
+    :param z_p: The Z-coordinate for the pose
+    :param x_o: The X-value for the orientation
+    :param y_o: The Y-value for the orientation
+    :param z_o: The Z-value for the orientation
+    :param w_o: The W-value for the orientation
+    :type x_p: float
+    :type y_p: float
+    :type z_p: float
+    :type x_o: float
+    :type y_o: float
+    :type z_o: float
+    :type w_o: float
+    :returns: Pose
+    :rtype: PoseStamped
+    """
+    pose_target = geometry_msgs.msg.Pose()
+    pose_target.position.x = x_p
+    pose_target.position.y = y_p
+    pose_target.position.z = z_p
+    pose_target.orientation.x = x_o
+    pose_target.orientation.y = y_o
+    pose_target.orientation.z = z_o
+    pose_target.orientation.w = w_o
+    return pose_target
