@@ -1,0 +1,11 @@
+# Ignore DinoVIT directory
+DinoViT/
+
+# Ignore __pycache__ directories
+__pycache__/
+experiments/pencile_sharpener/__pycache__/
+experiments/wood/__pycache__/
+
+# Ignore specific files or directories
+dust.py
+mini_dust3r/
