@@ -46,24 +46,24 @@ class YuMiExperiment(ABC):
                 # self.replay(live_waypoints)
                 rospy.sleep(1)
         
-                error = 1000
-                while error > 0.005:
-                    T_delta_cam = pose_estimator.run(output_path=f"{self.dir}/", camera_prefix="d405")
-                    T_camera_eef = np.load(pose_estimator.T_CE_l_path)
-                    T_new_eef_world = yumi.get_curent_T_left() @ T_camera_eef @ T_delta_cam @ pose_inv(T_camera_eef)
-                    rospy.loginfo("T_delta_world is {0}".format(T_new_eef_world))
-                    xyz = translation_from_matrix(T_new_eef_world).tolist()
-                    error = np.linalg.norm(T_delta_cam[:3, 3])
-                    print(error)
-                    quaternion = quaternion_from_matrix(T_new_eef_world).tolist()
-                    pose_new_eef_world_l = project3D(xyz + quaternion, demo_waypoints[0])
-                    yumi.plan_left_arm(pose_new_eef_world_l)
-                    rospy.sleep(0.1)
+                # error = 1000
+                # while error > 0.005:
+                #     T_delta_cam = pose_estimator.run(output_path=f"{self.dir}/", camera_prefix="d405")
+                #     T_camera_eef = np.load(pose_estimator.T_CE_l_path)
+                #     T_new_eef_world = yumi.get_curent_T_left() @ T_camera_eef @ T_delta_cam @ pose_inv(T_camera_eef)
+                #     rospy.loginfo("T_delta_world is {0}".format(T_new_eef_world))
+                #     xyz = translation_from_matrix(T_new_eef_world).tolist()
+                #     error = np.linalg.norm(T_delta_cam[:3, 3])
+                #     print(error)
+                #     quaternion = quaternion_from_matrix(T_new_eef_world).tolist()
+                #     pose_new_eef_world_l = project3D(xyz + quaternion, demo_waypoints[0])
+                #     yumi.plan_left_arm(pose_new_eef_world_l)
+                #     rospy.sleep(0.1)
      
-                T_bottleneck_left = create_homogeneous_matrix(demo_waypoints[0][:3], demo_waypoints[0][3:])
-                T_delta_world = yumi.get_curent_T_left() @ pose_inv(T_bottleneck_left)
-                live_waypoints = apply_transformation_to_waypoints(demo_waypoints, T_delta_world, project3D=True)
-                self.replay(live_waypoints)
+                # T_bottleneck_left = create_homogeneous_matrix(demo_waypoints[0][:3], demo_waypoints[0][3:])
+                # T_delta_world = yumi.get_curent_T_left() @ pose_inv(T_bottleneck_left)
+                # live_waypoints = apply_transformation_to_waypoints(demo_waypoints, T_delta_world, project3D=True)
+                # self.replay(live_waypoints)
 
                 # del pose_estimator
                 # dinobot_alignment = DINOBotAlignment(DIR=self.dir)

@@ -79,7 +79,7 @@ def pose_inv(pose):
     T[:3, 3] = - R.T @ np.ascontiguousarray(pose[:3, 3])
     return T
 
-def apply_transformation_to_waypoints(waypoints_np, delta_R, project3D=False):
+def apply_transformation_to_waypoints(waypoints_np, delta_R, project3D=False, keepHeight=False):
     """
     Apply a transformation to a list of end-effector poses using NumPy vectorization.
     """
@@ -108,9 +108,9 @@ def apply_transformation_to_waypoints(waypoints_np, delta_R, project3D=False):
         rpy = R.from_matrix(delta_R[:3, :3]).as_euler("xyz")
         yaw_only_delta_rotation = R.from_euler("xyz", [0, 0, rpy[-1]]).as_matrix()
         yaw_only_transformed_rotations = yaw_only_delta_rotation @ waypoint_rot_matrices
-        transformed_translations[:, 2] = translations[:, 2]
+        if keepHeight == False:
+            transformed_translations[:, 2] = translations[:, 2]
         transformed_rotations = R.from_matrix(yaw_only_transformed_rotations).as_quat()
-
 
     # Concatenate the results
     transformed_waypoints = np.hstack((transformed_translations, transformed_rotations))

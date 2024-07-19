@@ -17,6 +17,23 @@ def create_convergence_trajectory(initial_pose, ground_truth, steps=50):
     trajectory = np.linspace(initial_pose, ground_truth, steps)
     return trajectory
 
+def create_convergence_trajectory_noise(initial_pose, ground_truth, steps=20):
+    # Generate noise for each step
+    # Generate trajectory points
+    trajectory = np.linspace(initial_pose, ground_truth, steps)
+    for i in range(steps):
+        noise_x = np.random.normal(0, 0.03, steps)
+        noise_y = np.random.normal(0, 0.03, steps)
+        noise_yaw = np.random.normal(0, 7, steps)
+        
+        # Update initial_pose with noisy increments
+        trajectory[i][0] += noise_x[i]
+        trajectory[i][1] += noise_y[i]
+        trajectory[i][2] += noise_yaw[i]
+        
+    
+    return trajectory
+
 # Update function for animation
 def update(frame, trajectory, scatter, cmap, norm):
     scatter.set_offsets(trajectory[:frame+1, :2])
@@ -62,19 +79,20 @@ def visualize_convergence_on_sphere(trajectory):
     cbar.set_label('∆Yaw (Degrees)')
 
     plt.legend()
+    ani.save('animated_plot.gif', writer='pillow', fps=10)
     plt.show()
 
-# # Ground truth pose (delta_x, delta_y, delta_yaw)
-# ground_truth = np.array([0.5, -0.5, 5])
+# Ground truth pose (delta_x, delta_y, delta_yaw)
+ground_truth = np.array([0.3, -0.25, 42])
 
-# # Initial prediction (delta_x, delta_y, delta_yaw)
-# initial_pose = np.array([0, 0, 0])
+# Initial prediction (delta_x, delta_y, delta_yaw)
+initial_pose = np.array([0, 0, 0])
 
-# # Generate the convergence trajectory
-# trajectory = create_convergence_trajectory(initial_pose, ground_truth)
+# Generate the convergence trajectory
+trajectory = create_convergence_trajectory_noise(initial_pose, ground_truth)
 
-# # Visualize the convergence on the sphere
-# visualize_convergence_on_sphere(trajectory)
+# Visualize the convergence on the sphere
+visualize_convergence_on_sphere(trajectory)
 
 
 

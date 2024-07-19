@@ -8,7 +8,7 @@ from sensor_msgs.msg import Image as ImageMsg
 from PoseEst.direct.preprocessor import Preprocessor, pose_inv, SceneData
 from langSAM import LangSAMProcessor
 from trajectory_utils import create_homogeneous_matrix, euler_from_matrix
-
+import time
 class PoseEstimation:
     def __init__(self, dir, text_prompt, visualize):
         self.langSAMProcessor = LangSAMProcessor(text_prompt=text_prompt)
@@ -27,7 +27,7 @@ class PoseEstimation:
 
         self.intrinsics_d405_path = "handeye/intrinsics_d405.npy"
         self.T_CE_l_path = "handeye/T_C_EEF_wrist_l.npy"
-        
+        self.ICP_estimator = Open3dICPPoseEstimator()
 
     def get_live_data(self, camera_prefix, timeout=5):
         """
@@ -209,11 +209,19 @@ class PoseEstimation:
         
         return T_delta_cam
 
-    def run(self, output_path, camera_prefix):
+    def run(self, output_path, camera_prefix, denseICP = False,  use6DoF = False):
         rgb_image, depth_image, mask_image = self.inference_and_save(camera_prefix, output_path)
         data = self.process_data(rgb_image, depth_image, mask_image, camera_prefix)
         
-        return self.estimate_pose(data, camera_prefix)
+        if denseICP:
+            pcd0 = o3d.geometry.PointCloud()
+            pcd1 = o3d.geometry.PointCloud()
+
+            pcd0.points = o3d.utility.Vector3dVector(data["pc0"][:, :3])
+            pcd1.points = o3d.utility.Vector3dVector(data["pc1"][:, :3])
+            return self.ICP_estimator.estimate_relative_pose(pcd0, pcd1, np.load(self.T_WC_path), use6DoF, verbose=False, visualise_pcds=True)
+        else:
+            return self.estimate_pose(data, camera_prefix)
 
     def decouple_run(self, output_path, camera_prefix):
         rgb_image, depth_image, mask_image = self.inference_and_save(camera_prefix, output_path)
@@ -336,6 +344,115 @@ class PoseEstimation:
 
         return T_delta_world
 
+class Open3dICPPoseEstimator:
+
+    def __init__(self,
+                 max_correspondence_distance: float = 0.10,
+                 max_iteration: int = 10,
+                 timeout=5
+                 ):
+        self.timeout = timeout
+        self.max_correspondence_distance = max_correspondence_distance
+        self.max_iteration = max_iteration
+        self.count = 0
+
+    def estimate_relative_pose(self,
+                               pcd1_o3d: o3d.geometry.PointCloud,
+                               pcd2_o3d: o3d.geometry.PointCloud,
+                               T_WC: np.ndarray,
+                               use_6DoF=False,
+                               verbose=True,
+                               visualise_pcds=False) -> np.ndarray:
+
+        start = time.time()
+
+        pcd1_mean = np.asarray(pcd1_o3d.points).mean(axis=0)
+        pcd2_mean = np.asarray(pcd2_o3d.points).mean(axis=0)
+
+        best_fitness = None
+        T_delta_best = None
+        best_inlier_rmse = None
+        best_num_correspondences = 0
+
+        while time.time() - start < self.timeout:
+            if use_6DoF == False:
+                T_init = self.sample_icp_initialisation(T_WC, pcd1_mean, pcd2_mean, std_t=0.01, max_rot_angle=90)
+            else:
+                T_init = self.sample_icp_initialisation_6DoF(T_WC, pcd1_mean, pcd2_mean, std_t=0.01, max_rot_angle=90)
+
+            reg_p2p = o3d.pipelines.registration.registration_icp(
+                pcd1_o3d, pcd2_o3d, self.max_correspondence_distance, T_init,
+                o3d.pipelines.registration.TransformationEstimationPointToPoint(),
+                o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=self.max_iteration)
+            )
+
+            fitness = reg_p2p.fitness
+            inlier_rmse = reg_p2p.inlier_rmse
+            num_correspondences = len(reg_p2p.correspondence_set)
+
+            if best_inlier_rmse is None or (inlier_rmse < best_inlier_rmse and inlier_rmse != 0):
+                best_fitness = fitness
+                best_inlier_rmse = inlier_rmse
+                T_delta_best = reg_p2p.transformation
+                best_num_correspondences = num_correspondences
+
+            if verbose:
+                print(f'ICP initialisation - fitness: {fitness:.3f} / {best_fitness:.3f} - '
+                      f'inlier RMSE: {inlier_rmse:.3f} / {best_inlier_rmse:.3f} - '
+                      f'num correspondences: {num_correspondences} / {best_num_correspondences}')
+
+            self.count += 1
+        if visualise_pcds:
+            self.draw_registration_result(pcd1_o3d, pcd2_o3d, T_delta_best)
+
+        if best_fitness == 0:
+            raise Exception('Open3D ICP was unable to register the two point clouds')
+
+        return T_delta_best
+
+    @staticmethod
+    def sample_icp_initialisation(T_WC, pcd1_mean, pcd2_mean, std_t=0.01, max_rot_angle=90):
+        angle = np.radians(np.random.uniform(-max_rot_angle, max_rot_angle))
+        rotation_z = np.array([[np.cos(angle), -np.sin(angle), 0],
+                               [np.sin(angle), np.cos(angle), 0],
+                               [0, 0, 1]])
+
+        trans_init = np.eye(4)
+        trans_init[:3, :3] = rotation_z
+        trans_init[:3, 3] = T_WC[:3, :3] @ (pcd2_mean - pcd1_mean + std_t * np.random.randn(3))
+
+        return trans_init
+
+    @staticmethod
+    def draw_registration_result(source, target, transformation):
+        source_temp = source.transform(transformation)
+        o3d.visualization.draw_geometries([source_temp, target])
+
+    @staticmethod
+    def sample_icp_initialisation_6DoF(T_WC, pcd1_mean, pcd2_mean, std_t=0.01, max_rot_angle=90):
+        angles = np.radians(np.random.uniform(-max_rot_angle, max_rot_angle, 3))
+        rotation_matrix = Open3dICPPoseEstimator.euler_angles_to_rotation_matrix(angles)
+
+        trans_init = np.eye(4)
+        trans_init[:3, :3] = rotation_matrix
+        trans_init[:3, 3] = T_WC[:3, :3] @ (pcd2_mean - pcd1_mean + std_t * np.random.randn(3))
+
+        return trans_init
+
+    @staticmethod
+    def euler_angles_to_rotation_matrix(angles):
+        roll, pitch, yaw = angles
+        R_x = np.array([[1, 0, 0],
+                        [0, np.cos(roll), -np.sin(roll)],
+                        [0, np.sin(roll), np.cos(roll)]])
+        R_y = np.array([[np.cos(pitch), 0, np.sin(pitch)],
+                        [0, 1, 0],
+                        [-np.sin(pitch), 0, np.cos(pitch)]])
+        R_z = np.array([[np.cos(yaw), -np.sin(yaw), 0],
+                        [np.sin(yaw), np.cos(yaw), 0],
+                        [0, 0, 1]])
+        return R_z @ R_y @ R_x
+    
 if __name__ == '__main__':
     rospy.init_node('PoseEstimation', anonymous=True)
     dir = "experiments/scissor"
