@@ -5,11 +5,11 @@ import numpy as np
 from sensor_msgs.msg import Image
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from cv_bridge import CvBridge, CvBridgeError
-import yumi_moveit_utils as yumi
+import moveit_utils.yumi_moveit_utils as yumi
 from scipy.spatial.transform import Rotation
 from trajectory_utils import translation_from_matrix, quaternion_from_matrix, pose_inv, \
                              project3D, create_homogeneous_matrix, apply_transformation_to_waypoints, euler_from_matrix
-from ikSolver import IKSolver
+from moveit_utils.ikSolver import IKSolver
 import poselib
 from poseEstimation import PoseEstimation
 import json

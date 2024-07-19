@@ -7,7 +7,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_of_parent_dir = os.path.abspath(os.path.join(current_dir, os.pardir, os.pardir))
 sys.path.append(parent_of_parent_dir)
 
-import yumi_moveit_utils as yumi
+import moveit_utils.yumi_moveit_utils as yumi
 from base_experiment import YuMiExperiment
 from trajectory_utils import compute_pre_grasp_pose, merge_trajectories, align_trajectory_points
 
@@ -19,13 +19,11 @@ class SharpenerExperiment(YuMiExperiment):
         live_bottleneck_left, insert_left_start,\
         live_grasp_right, insert_left_end = live_waypoints
         
-
         """
         Move to the bottlenecks
         """
         yumi.gripper_effort(yumi.LEFT, 20)
         yumi.plan_left_arm(live_bottleneck_left)
-        print("live_bottleneck:", live_bottleneck_left)
 
         right_pre_grasp_pose = compute_pre_grasp_pose(live_grasp_right[:3], live_grasp_right[3:]).tolist()
         yumi.plan_right_arm(right_pre_grasp_pose)
@@ -33,14 +31,12 @@ class SharpenerExperiment(YuMiExperiment):
         """
         Cartesian trajectories to reach the grasp pose
         """
-        
         (plan_right, _) = yumi.group_r.compute_cartesian_path([yumi.create_pose(*live_grasp_right)], 0.01, 0.0)
         plan_right = yumi.group_r.retime_trajectory(yumi.robot.get_current_state(), plan_right, 0.02, 0.02)
         yumi.group_r.execute(plan_right)
         rospy.sleep(0.1)
         yumi.gripper_effort(yumi.RIGHT, 3.5)
-        # rospy.sleep(0.1)
-        # yumi.gripper_effort(yumi.RIGHT, 10)
+
         """
         Uncovering trajectories
         """
@@ -60,12 +56,7 @@ class SharpenerExperiment(YuMiExperiment):
         merged_plan = yumi.group_both.retime_trajectory(yumi.robot.get_current_state(), merged_plan, 3.5, 3.5)
         yumi.group_both.execute(merged_plan)
 
-        # plan_left = yumi.group_l.retime_trajectory(yumi.robot.get_current_state(), plan_left, 2, 2)
-        # yumi.group_l.execute(plan_left)
-
-
         rospy.sleep(3)
-
         SharpenerExperiment.reset()
 
     @staticmethod
