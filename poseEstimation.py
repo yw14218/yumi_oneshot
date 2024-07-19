@@ -9,6 +9,7 @@ from PoseEst.direct.preprocessor import Preprocessor, pose_inv, SceneData
 from langSAM import LangSAMProcessor
 from trajectory_utils import create_homogeneous_matrix, euler_from_matrix
 import time
+
 class PoseEstimation:
     def __init__(self, dir, text_prompt, visualize):
         self.langSAMProcessor = LangSAMProcessor(text_prompt=text_prompt)
