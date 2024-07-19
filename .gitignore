@@ -13,3 +13,7 @@ experiments/wood/__pycache__/
 dust.py
 mini_dust3r/
 my_mesh.obj
+
+dataset/
+legacy/
+random_experiments/
