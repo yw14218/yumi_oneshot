@@ -2,13 +2,13 @@ import rospy
 import ros_numpy
 import numpy as np
 import open3d as o3d
-from PIL import Image, ImageDraw
-import copy
+from PIL import Image
 from sensor_msgs.msg import Image as ImageMsg
-from PoseEst.direct.preprocessor import Preprocessor, pose_inv, SceneData
+from PoseEst.direct.preprocessor import Preprocessor, SceneData
 from langSAM import LangSAMProcessor
-from trajectory_utils import create_homogeneous_matrix, euler_from_matrix
-import time
+from trajectory_utils import euler_from_matrix
+from scipy.spatial.transform import Rotation as R
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class PoseEstimation:
     def __init__(self, dir, text_prompt, visualize):
@@ -28,7 +28,6 @@ class PoseEstimation:
 
         self.intrinsics_d405_path = "handeye/intrinsics_d405.npy"
         self.T_CE_l_path = "handeye/T_C_EEF_wrist_l.npy"
-        self.ICP_estimator = Open3dICPPoseEstimator()
 
     def get_live_data(self, camera_prefix, timeout=5):
         """
@@ -161,7 +160,7 @@ class PoseEstimation:
 
         else:
             # Compute FPFH features
-            voxel_size = 0.05 # Set voxel size for downsampling (adjust based on your data)
+            voxel_size = 0.01 # Set voxel size for downsampling (adjust based on your data)
             source_down = pcd0.voxel_down_sample(voxel_size)
             target_down = pcd1.voxel_down_sample(voxel_size)
 
@@ -176,19 +175,29 @@ class PoseEstimation:
                 target_down,
                 o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 5, max_nn=100))
         
-            # Global registration using RANSAC
+            # # Global registration using RANSAC
+            # distance_threshold = voxel_size * 1.5
+            # result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
+            #     source_down, target_down, source_fpfh, target_fpfh, mutual_filter=False,
+            #     max_correspondence_distance=distance_threshold,
+            #     estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(), 
+            #     ransac_n=4,
+            #     checkers=[
+            #         o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.9), 
+            #         o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(distance_threshold)
+            #     ],
+            #     criteria=o3d.pipelines.registration.RANSACConvergenceCriteria(4000000, 500)
+            # )
+
+            # # Use the result of global registration as the initial transformation for ICP
+            # trans_init = result.transformation
+            # Global registration using FGR
             distance_threshold = voxel_size * 1.5
-            result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
-                source_down, target_down, source_fpfh, target_fpfh, mutual_filter=False,
-                max_correspondence_distance=distance_threshold,
-                estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(), 
-                ransac_n=4,
-                checkers=[
-                    o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.9), 
-                    o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(distance_threshold)
-                ],
-                criteria=o3d.pipelines.registration.RANSACConvergenceCriteria(4000000, 500)
-            )
+            result = o3d.pipelines.registration.registration_fgr_based_on_feature_matching(
+                source_down, target_down, source_fpfh, target_fpfh,
+                o3d.pipelines.registration.FastGlobalRegistrationOption(
+                    maximum_correspondence_distance=distance_threshold))
+
 
             # Use the result of global registration as the initial transformation for ICP
             trans_init = result.transformation
@@ -204,23 +213,19 @@ class PoseEstimation:
 
 
         # Draw the result
-        # draw_registration_result(pcd0, pcd1, T_delta_cam)
-        # rospy.loginfo(f"ICP Fitness: {reg_p2p.fitness}")
-        # rospy.loginfo(f"ICP Inlier RMSE: {reg_p2p.inlier_rmse}")
+        ProbPPR.draw_registration_result(pcd0, pcd1, T_delta_cam)
+        rospy.loginfo(f"ICP Fitness: {reg_p2p.fitness}")
+        rospy.loginfo(f"ICP Inlier RMSE: {reg_p2p.inlier_rmse}")
         
         return T_delta_cam
 
-    def run(self, output_path, camera_prefix, denseICP = False,  use6DoF = False):
+    def run(self, output_path, camera_prefix, probICP = False):
         rgb_image, depth_image, mask_image = self.inference_and_save(camera_prefix, output_path)
         data = self.process_data(rgb_image, depth_image, mask_image, camera_prefix)
         
-        if denseICP:
-            pcd0 = o3d.geometry.PointCloud()
-            pcd1 = o3d.geometry.PointCloud()
-
-            pcd0.points = o3d.utility.Vector3dVector(data["pc0"][:, :3])
-            pcd1.points = o3d.utility.Vector3dVector(data["pc1"][:, :3])
-            return self.ICP_estimator.estimate_relative_pose(pcd0, pcd1, np.load(self.T_WC_path), use6DoF, verbose=False, visualise_pcds=True)
+        if probICP:
+            probPPR = ProbPPR(voxel_size=0.005)
+            return probPPR.main(data, visualize=True)
         else:
             return self.estimate_pose(data, camera_prefix)
 
@@ -275,185 +280,167 @@ class PoseEstimation:
         diff_rpy = euler_from_matrix(T_delta_world.copy()).copy()
 
         return diff_xyz, diff_rpy
+
+class ProbPPR:
+    def __init__(self, voxel_size=0.005):
+        self.voxel_size = voxel_size
     
-    def run_image_match(self, output_path, camera_prefix):
-        import torch
-        import cv2
-        import poselib
-        from matplotlib import pyplot as plt
-
-        def warp_corners_and_draw_matches(ref_points, dst_points, img1, img2):
-            # Calculate the Homography matrix
-            H, mask = cv2.findHomography(ref_points, dst_points, cv2.USAC_MAGSAC, 3.5, maxIters=1_000, confidence=0.999)
-            mask = mask.flatten()
-
-            # Get corners of the first image (image1)
-            h, w = img1.shape[:2]
-            corners_img1 = np.array([[0, 0], [w-1, 0], [w-1, h-1], [0, h-1]], dtype=np.float32).reshape(-1, 1, 2)
-
-            # Warp corners to the second image (image2) space
-            warped_corners = cv2.perspectiveTransform(corners_img1, H)
-
-            # Draw the warped corners in image2
-            img2_with_corners = img2.copy()
-            for i in range(len(warped_corners)):
-                start_point = tuple(warped_corners[i-1][0].astype(int))
-                end_point = tuple(warped_corners[i][0].astype(int))
-                cv2.line(img2_with_corners, start_point, end_point, (0, 255, 0), 4)  # Using solid green for corners
-
-            # Prepare keypoints and matches for drawMatches function
-            keypoints1 = [cv2.KeyPoint(p[0], p[1], 5) for p in ref_points]
-            keypoints2 = [cv2.KeyPoint(p[0], p[1], 5) for p in dst_points]
-            matches = [cv2.DMatch(i,i,0) for i in range(len(mask)) if mask[i]]
-
-            # Draw inlier matches
-            img_matches = cv2.drawMatches(img1, keypoints1, img2_with_corners, keypoints2, matches, None,
-                                        matchColor=(0, 255, 0), flags=2)
-
-            return img_matches
-        
-        rgb_image, depth_image, mask_image = self.inference_and_save(camera_prefix, output_path)
-        live_rgb_seg = np.array(rgb_image) * np.array(mask_image).astype(bool)[..., None]
-        if camera_prefix == "d415":
-            demo_rgb_seg = np.array(Image.open(f"{self.dir}/demo_head_rgb_seg.png"))
-        else:
-            demo_rgb_seg = np.array(Image.open(f"{self.dir}/demo_wrist_rgb_seg.png"))
-        xfeat = torch.hub.load('verlab/accelerated_features', 'XFeat', pretrained = True, top_k = 4096)
-        mkpts_0, mkpts_1 = xfeat.match_xfeat_star(demo_rgb_seg, live_rgb_seg, top_k = 4096)
-        canvas = warp_corners_and_draw_matches(mkpts_0, mkpts_1, demo_rgb_seg, live_rgb_seg)
-        plt.figure(figsize=(12,12))
-        plt.imshow(canvas[..., ::-1]), plt.show()
-
-        K = np.load(self.intrinsics_d415_path)
-        T_WC = np.load(self.T_WC_path)
-        def image_to_world(points, K, T_WC, depth=1.0):
-            K_inv = np.linalg.inv(K)
-            points_hom = np.hstack((points, np.ones((points.shape[0], 1))))
-            points_cam = (K_inv @ points_hom.T).T * depth
-            points_world = (T_WC @ np.hstack((points_cam, np.ones((points_cam.shape[0], 1)))).T).T
-            return points_world[:, :3]
-
-        points1_world = image_to_world(mkpts_0, K, T_WC)
-        points2_world = image_to_world(mkpts_1, K, T_WC)
-
-        M, inliers = cv2.estimateAffinePartial2D(points1_world[:, :2], points2_world[:, :2])
-
-        # Construct the 3D transformation matrix
-        T_delta_world = np.eye(4)
-        T_delta_world[0:2, 0:2] = M[0:2, 0:2]
-        T_delta_world[0:2, 3] = M[0:2, 2]
-
-        return T_delta_world
-
-class Open3dICPPoseEstimator:
-
-    def __init__(self,
-                 max_correspondence_distance: float = 0.10,
-                 max_iteration: int = 10,
-                 timeout=5
-                 ):
-        self.timeout = timeout
-        self.max_correspondence_distance = max_correspondence_distance
-        self.max_iteration = max_iteration
-        self.count = 0
-
-    def estimate_relative_pose(self,
-                               pcd1_o3d: o3d.geometry.PointCloud,
-                               pcd2_o3d: o3d.geometry.PointCloud,
-                               T_WC: np.ndarray,
-                               use_6DoF=False,
-                               verbose=True,
-                               visualise_pcds=False) -> np.ndarray:
-
-        start = time.time()
-
-        pcd1_mean = np.asarray(pcd1_o3d.points).mean(axis=0)
-        pcd2_mean = np.asarray(pcd2_o3d.points).mean(axis=0)
-
-        best_fitness = None
-        T_delta_best = None
-        best_inlier_rmse = None
-        best_num_correspondences = 0
-
-        while time.time() - start < self.timeout:
-            if use_6DoF == False:
-                T_init = self.sample_icp_initialisation(T_WC, pcd1_mean, pcd2_mean, std_t=0.01, max_rot_angle=90)
-            else:
-                T_init = self.sample_icp_initialisation_6DoF(T_WC, pcd1_mean, pcd2_mean, std_t=0.01, max_rot_angle=90)
-
-            reg_p2p = o3d.pipelines.registration.registration_icp(
-                pcd1_o3d, pcd2_o3d, self.max_correspondence_distance, T_init,
-                o3d.pipelines.registration.TransformationEstimationPointToPoint(),
-                o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=self.max_iteration)
-            )
-
-            fitness = reg_p2p.fitness
-            inlier_rmse = reg_p2p.inlier_rmse
-            num_correspondences = len(reg_p2p.correspondence_set)
-
-            if best_inlier_rmse is None or (inlier_rmse < best_inlier_rmse and inlier_rmse != 0):
-                best_fitness = fitness
-                best_inlier_rmse = inlier_rmse
-                T_delta_best = reg_p2p.transformation
-                best_num_correspondences = num_correspondences
-
-            if verbose:
-                print(f'ICP initialisation - fitness: {fitness:.3f} / {best_fitness:.3f} - '
-                      f'inlier RMSE: {inlier_rmse:.3f} / {best_inlier_rmse:.3f} - '
-                      f'num correspondences: {num_correspondences} / {best_num_correspondences}')
-
-            self.count += 1
-        if visualise_pcds:
-            self.draw_registration_result(pcd1_o3d, pcd2_o3d, T_delta_best)
-
-        if best_fitness == 0:
-            raise Exception('Open3D ICP was unable to register the two point clouds')
-
-        return T_delta_best
-
-    @staticmethod
-    def sample_icp_initialisation(T_WC, pcd1_mean, pcd2_mean, std_t=0.01, max_rot_angle=90):
-        angle = np.radians(np.random.uniform(-max_rot_angle, max_rot_angle))
-        rotation_z = np.array([[np.cos(angle), -np.sin(angle), 0],
-                               [np.sin(angle), np.cos(angle), 0],
-                               [0, 0, 1]])
-
-        trans_init = np.eye(4)
-        trans_init[:3, :3] = rotation_z
-        trans_init[:3, 3] = T_WC[:3, :3] @ (pcd2_mean - pcd1_mean + std_t * np.random.randn(3))
-
-        return trans_init
-
     @staticmethod
     def draw_registration_result(source, target, transformation):
         source_temp = source.transform(transformation)
         o3d.visualization.draw_geometries([source_temp, target])
 
+    def preprocess_point_cloud(self, pcd):
+        try:
+            pcd_down = pcd.voxel_down_sample(self.voxel_size)
+            pcd_down.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=self.voxel_size * 2, max_nn=30))
+            return pcd_down
+        except Exception as e:
+            print(f"Error in preprocess_point_cloud: {e}")
+            return None
+
+    def compute_fpfh_features(self, pcd):
+        try:
+            radius_feature = self.voxel_size * 5
+            return o3d.pipelines.registration.compute_fpfh_feature(
+                pcd, o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100))
+        except Exception as e:
+            print(f"Error in compute_fpfh_features: {e}")
+            return None
+
+    def execute_fast_global_registration(self, source, target, source_fpfh, target_fpfh):
+        try:
+            distance_threshold = self.voxel_size * 0.5
+            result = o3d.pipelines.registration.registration_fgr_based_on_feature_matching(
+                source, target, source_fpfh, target_fpfh,
+                o3d.pipelines.registration.FastGlobalRegistrationOption(
+                    maximum_correspondence_distance=distance_threshold))
+            return result
+        except Exception as e:
+            print(f"Error in execute_fast_global_registration: {e}")
+            return None
+
+    def extract_translation_rotation(self, transformation):
+        translation = transformation[:3, 3]
+        rotation = transformation[:3, :3]
+        return translation, rotation
+
+    def transformations_to_vector(self, transformations):
+        vectors = []
+        for transformation in transformations:
+            translation, rotation = self.extract_translation_rotation(transformation)
+            rotation_quat = R.from_matrix(rotation).as_quat()
+            vector = np.concatenate((translation, rotation_quat))
+            vectors.append(vector)
+        return np.array(vectors)
+
+    def compute_mean_transformation(self, transformations):
+        vectors = self.transformations_to_vector(transformations)
+        
+        # Compute mean translation
+        mean_translation = np.mean(vectors[:, :3], axis=0)
+        
+        # Compute mean rotation using quaternion averaging
+        mean_rotation_quat = np.mean(vectors[:, 3:], axis=0)
+        mean_rotation_quat /= np.linalg.norm(mean_rotation_quat)
+        mean_rotation = R.from_quat(mean_rotation_quat).as_matrix()
+        
+        mean_transformation = np.eye(4)
+        mean_transformation[:3, :3] = mean_rotation
+        mean_transformation[:3, 3] = mean_translation
+        
+        return mean_transformation
+
+    def compute_covariance_matrix(self, transformations):
+        vectors = self.transformations_to_vector(transformations)
+        mean_vector = np.mean(vectors, axis=0)
+        centered_vectors = vectors - mean_vector
+        covariance_matrix = np.cov(centered_vectors, rowvar=False)
+        return covariance_matrix
+
     @staticmethod
-    def sample_icp_initialisation_6DoF(T_WC, pcd1_mean, pcd2_mean, std_t=0.01, max_rot_angle=90):
-        angles = np.radians(np.random.uniform(-max_rot_angle, max_rot_angle, 3))
-        rotation_matrix = Open3dICPPoseEstimator.euler_angles_to_rotation_matrix(angles)
+    def process_registration(source, target, transformation):
+        source_sample = source.random_down_sample(0.8)
+        target_sample = target.random_down_sample(0.8)
+        
+        result = o3d.pipelines.registration.registration_icp(
+            source_sample, target_sample, 0.01, transformation,
+            o3d.pipelines.registration.TransformationEstimationPointToPoint()
+        )
+        
+        return result.transformation
 
-        trans_init = np.eye(4)
-        trans_init[:3, :3] = rotation_matrix
-        trans_init[:3, 3] = T_WC[:3, :3] @ (pcd2_mean - pcd1_mean + std_t * np.random.randn(3))
+    def estimate_registration_uncertainty(self, source, target, transformation, num_iterations=5000):
+        try:
+            transformations = []
+            
+            with ThreadPoolExecutor() as executor:
+                # Submit all tasks to the executor
+                futures = [executor.submit(ProbPPR.process_registration, source, target, transformation) for _ in range(num_iterations)]
+                
+                for future in as_completed(futures):
+                    transformations.append(future.result())
+            
+            # Check the type and shape of the transformations
+            if not transformations:
+                raise ValueError("No transformations were collected.")
+            
+            # Convert list of transformations to a numpy array
+            transformations = np.array(transformations)
+            
+            # Compute mean and covariance matrix
+            mean_transformation = self.compute_mean_transformation(transformations)
+            covariance_matrix = self.compute_covariance_matrix(transformations)
+            
+            return mean_transformation, covariance_matrix
+            
+        except Exception as e:
+            print(f"Error in estimate_registration_uncertainty: {e}")
+            return None, None
 
-        return trans_init
+    def main(self, data, confidence_threshold=0.7, visualize=True):
+        try:
+            pcd0 = o3d.geometry.PointCloud()
+            pcd1 = o3d.geometry.PointCloud()
+            pcd0.points = o3d.utility.Vector3dVector(data["pc0"][:, :3])
+            pcd1.points = o3d.utility.Vector3dVector(data["pc1"][:, :3])
 
-    @staticmethod
-    def euler_angles_to_rotation_matrix(angles):
-        roll, pitch, yaw = angles
-        R_x = np.array([[1, 0, 0],
-                        [0, np.cos(roll), -np.sin(roll)],
-                        [0, np.sin(roll), np.cos(roll)]])
-        R_y = np.array([[np.cos(pitch), 0, np.sin(pitch)],
-                        [0, 1, 0],
-                        [-np.sin(pitch), 0, np.cos(pitch)]])
-        R_z = np.array([[np.cos(yaw), -np.sin(yaw), 0],
-                        [np.sin(yaw), np.cos(yaw), 0],
-                        [0, 0, 1]])
-        return R_z @ R_y @ R_x
-    
+            source_down = self.preprocess_point_cloud(pcd0)
+            target_down = self.preprocess_point_cloud(pcd1)
+
+            if source_down is None or target_down is None:
+                raise ValueError("Preprocessing failed")
+
+            source_fpfh = self.compute_fpfh_features(source_down)
+            target_fpfh = self.compute_fpfh_features(target_down)
+
+            if source_fpfh is None or target_fpfh is None:
+                raise ValueError("Feature computation failed")
+
+            result_fgr = self.execute_fast_global_registration(source_down, target_down, source_fpfh, target_fpfh)
+
+            if result_fgr is None:
+                raise ValueError("Fast Global Registration failed")
+
+            result_icp = o3d.pipelines.registration.registration_icp(
+                source_down, target_down, self.voxel_size, result_fgr.transformation,
+                o3d.pipelines.registration.TransformationEstimationPointToPlane())
+
+            mean_transformation, covariance_matrix = self.estimate_registration_uncertainty(
+                source_down, target_down, result_icp.transformation)
+
+            if mean_transformation is None or covariance_matrix is None:
+                raise ValueError("Uncertainty estimation failed")
+
+            if visualize:
+                self.draw_registration_result(pcd0, pcd1, mean_transformation)
+
+            return mean_transformation, covariance_matrix
+
+        except Exception as e:
+            print(f"An error occurred in main: {e}")
+            return None, None
+        
 if __name__ == '__main__':
     rospy.init_node('PoseEstimation', anonymous=True)
     dir = "experiments/scissor"

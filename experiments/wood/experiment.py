@@ -7,7 +7,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_of_parent_dir = os.path.abspath(os.path.join(current_dir, os.pardir, os.pardir))
 sys.path.append(parent_of_parent_dir)
 
-import yumi_moveit_utils as yumi
+import moveit_utils.yumi_moveit_utils as yumi
 from base_experiment import YuMiExperiment
 from trajectory_utils import align_trajectory_points, merge_trajectories, compute_pre_grasp_pose
 

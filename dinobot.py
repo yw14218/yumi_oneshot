@@ -6,7 +6,7 @@ import moveit_utils.yumi_moveit_utils as yumi
 from PIL import Image
 from sensor_msgs.msg import Image as ImageMsg
 from DinoViT.hand_utils import extract_descriptors, extract_desc_maps, extract_descriptor_nn
-from camera_utils import solve_transform_3d
+from camera_utils import solve_transform_3d, d405_K as K
 from trajectory_utils import pose_inv, euler_from_quat, euler_from_matrix
 from moveit_utils.cartesian_control import YuMiCartesianController
 from experiments import load_experiment
@@ -24,12 +24,15 @@ class DINOBotVS:
         self.depth_ref = np.array(Image.open(f"{DIR}/demo_wrist_depth.png"))
         self.seg_ref = np.array(Image.open(f"{DIR}/demo_wrist_seg.png")).astype(bool)
 
-        with torch.no_grad():
-            patches_xy, desc1, descriptor_vectors, num_patches = extract_descriptors(f"{DIR}/demo_wrist_rgb.png", f"{DIR}/demo_wrist_rgb.png", self.num_pairs, self.load_size)
-        
-        self.desc1 = desc1
-        self.descriptor_vectors = descriptor_vectors
-        self.num_patches = num_patches
+        self.width = self.depth_ref.shape[0]
+        self.height = self.depth_ref.shape[1]
+
+       # Load from file
+        cache = np.load(f'{DIR}/dino.npz')
+
+        self.desc1 = torch.tensor(cache['desc1'], device='cuda:0')
+        self.descriptor_vectors = torch.tensor(cache['descriptor_vectors'], device='cuda:0')
+        self.num_patches = tuple(cache['num_patches'])
 
         self.cartesian_controller = YuMiCartesianController()
 
@@ -52,27 +55,30 @@ class DINOBotVS:
         # Get keypoints for the reference image
         key_y, key_x = extract_descriptor_nn(self.descriptor_vectors, emb_im=self.desc1, 
                                             patched_shape=self.num_patches, return_heatmaps=False)
-        mkpts_0 = np.array([(y * 480 / self.num_patches[0], x * 848 / self.num_patches[1]) 
+        mkpts_0 = np.array([(y * self.width / self.num_patches[0], x * self.height / self.num_patches[1]) 
                             for y, x in zip(key_y, key_x)])
         
         # Get keypoints for the live image
         key_y, key_x = extract_descriptor_nn(self.descriptor_vectors, emb_im=descriptors_list[0], 
                                             patched_shape=self.num_patches, return_heatmaps=False)
-        mkpts_1 = np.array([(y * 480 / self.num_patches[0], x * 848 / self.num_patches[1]) 
+        mkpts_1 = np.array([(y * self.width / self.num_patches[0], x * self.height / self.num_patches[1]) 
                             for y, x in zip(key_y, key_x)])
         
         # Reverse x and y coordinates for both keypoints
         mkpts_0, mkpts_1 = mkpts_0[:, ::-1], mkpts_1[:, ::-1]
         
+
         if filter_seg:
             # Convert to integer coordinates for segmentation lookup
             coords = mkpts_0.astype(int)
             # Get segmentation values for corresponding coordinates
             seg_values = self.seg_ref[coords[:, 1], coords[:, 0]]
-            # Filter points where all segment values are True
-            mask = np.all(seg_values, axis=1)
-            mkpts_0, mkpts_1 = mkpts_0[mask], mkpts_1[mask]
-        
+            # Filter points where segment values are True
+            mask = seg_values
+
+            mkpts_0 = mkpts_0[mask]
+            mkpts_1 = mkpts_1[mask]
+                    
         return mkpts_0, mkpts_1
     
     def run(self):
@@ -95,23 +101,27 @@ class DINOBotVS:
             # Match descriptors
             mkpts_0, mkpts_1 = self.match_dino(live_rgb_dir)
             
+            if len(mkpts_0) <= 3:
+                pass
+
             # Load current depth image
             depth_cur = np.array(Image.open(live_depth_dir))
             
             # Compute transformation
-            T_est = solve_transform_3d(mkpts_0, mkpts_1, self.depth_ref, depth_cur)
+            T_est = solve_transform_3d(mkpts_0, mkpts_1, self.depth_ref, depth_cur, K)
             delta_T = np.eye(4) @ pose_inv(T_est)
             
             # Update error
             error = np.linalg.norm(delta_T[:3, 3])
-            
+            print(error)
+
             # Update pose
-            current_pose.position.x += T_est[0, 3]
-            current_pose.position.y -= T_est[1, 3]
+            current_pose.position.x += delta_T[0, 3]
+            current_pose.position.y -= delta_T[1, 3]
             
             # Extract and update roll, pitch, yaw (Euler angles)
             _, _, rz = euler_from_matrix(T_est)
-            current_rpy[-1] -= rz
+            # current_rpy[-1] -= rz
 
             eef_pose = yumi.create_pose_euler(current_pose.position.x, 
                                               current_pose.position.y, 

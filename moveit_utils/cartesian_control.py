@@ -1,5 +1,5 @@
 import rospy
-from ikSolver import IKSolver
+from moveit_utils.ikSolver import IKSolver
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 class YuMiCartesianController:
