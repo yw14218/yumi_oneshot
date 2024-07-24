@@ -82,17 +82,17 @@ def visualize_convergence_on_sphere(trajectory):
     ani.save('animated_plot.gif', writer='pillow', fps=10)
     plt.show()
 
-# Ground truth pose (delta_x, delta_y, delta_yaw)
-ground_truth = np.array([0.3, -0.25, 42])
+# # Ground truth pose (delta_x, delta_y, delta_yaw)
+# ground_truth = np.array([0.3, -0.25, 42])
 
-# Initial prediction (delta_x, delta_y, delta_yaw)
-initial_pose = np.array([0, 0, 0])
+# # Initial prediction (delta_x, delta_y, delta_yaw)
+# initial_pose = np.array([0, 0, 0])
 
-# Generate the convergence trajectory
-trajectory = create_convergence_trajectory_noise(initial_pose, ground_truth)
+# # Generate the convergence trajectory
+# trajectory = create_convergence_trajectory_noise(initial_pose, ground_truth)
 
-# Visualize the convergence on the sphere
-visualize_convergence_on_sphere(trajectory)
+# # Visualize the convergence on the sphere
+# visualize_convergence_on_sphere(trajectory)
 
 
 

@@ -2,9 +2,11 @@
 from abc import ABC, abstractmethod
 import argparse
 from experiments import load_experiment
+from trajectory_utils import euler_from_matrix
+import numpy as np
 
 class YuMiExperiment(ABC):
-    def __init__(self, dir, object, demo_waypoints, demo_head_rgb, demo_head_mask, demo_wrist_rgb, demo_wrist_mask):
+    def __init__(self, dir, object, demo_waypoints, rearrange_waypoints, demo_head_rgb, demo_head_mask, demo_wrist_rgb, demo_wrist_mask):
         """
         Initialize an ExperimentData instance with the provided data.
 
@@ -19,6 +21,7 @@ class YuMiExperiment(ABC):
         self.dir = dir
         self.object = object
         self.demo_waypoints = demo_waypoints
+        self.rearrange_waypoints=rearrange_waypoints
         self.demo_head_rgb = demo_head_rgb
         self.demo_head_mask = demo_head_mask
         self.demo_wrist_rgb = demo_wrist_rgb
@@ -27,34 +30,57 @@ class YuMiExperiment(ABC):
     @abstractmethod
     def replay(self, live_waypoints):
         raise NotImplementedError()
+    
+    @abstractmethod
+    def rearrange(self, rearrange_pose, arm):
+        raise NotImplementedError()
 
 def main(dir):
     experiment = load_experiment(args.dir)
-    pose_estimator = PoseEstimation(
-        dir=args.dir,
-        text_prompt=experiment.object,
-        visualize=False)
+    # pose_estimator = PoseEstimation(
+    #     dir=args.dir,
+    #     text_prompt=experiment.object,
+    #     visualize=False)
     
-    dinoBotVS = DINOBotVS(dir)
+    # dinoBotVS = DINOBotVS(dir)
+    # relCamVS = RelCamVS(dir)
+    homVS = HomVS(dir)
 
     # Initialize Moveit
     yumi.init_Moveit()
-    # yumi.reset_init()
+    yumi.reset_init()
+
+    bottleneck_left = experiment.demo_waypoints[0].tolist()
+    T_bottleneck_left = create_homogeneous_matrix(bottleneck_left[:3], bottleneck_left[3:])
 
     try:
         while not rospy.is_shutdown():
-            
-            # Initial head cam alignment
-            diff_xyz, diff_rpy = pose_estimator.decouple_run(output_path=f"{dir}/", camera_prefix="d415")
-
-            bottleneck_left_new = experiment.demo_waypoints[0].tolist()
-            bottleneck_left_new[0] += diff_xyz[0]
-            bottleneck_left_new[1] += diff_xyz[1]
-            # bottleneck_left_new[2] += 0.05
-            yumi.plan_left_arm(yumi.create_pose(*bottleneck_left_new[:3], *bottleneck_left_new[3:]))
-
             user_input = input("Proceed with waypoint transformation? (yes/no): ").strip().lower()
-            dinoBotVS.run()
+            # # Initial head cam alignment
+            # diff_xyz, diff_rpy = pose_estimator.decouple_run(output_path=f"{dir}/", camera_prefix="d415")
+            # bottleneck_left[0] += diff_xyz[0]
+            # bottleneck_left[1] += diff_xyz[1]
+            # # bottleneck_left[2] += 0.05
+
+            yumi.plan_left_arm(yumi.create_pose(*bottleneck_left[:3], *bottleneck_left[3:]))
+            # user_input = input("Proceed with waypoint transformation? (yes/no): ").strip().lower()
+            # del pose_estimator
+            homVS.run()
+    
+            T_delta_world =  yumi.get_curent_T_left() @ pose_inv(T_bottleneck_left)
+            rz = np.rad2deg(euler_from_matrix(T_delta_world)[-1])
+            if abs(rz) > 50:
+                # Rearrange experiment
+                demo_rearrange = experiment.rearrange_waypoints
+                live_rearrange = apply_transformation_to_waypoints(demo_rearrange, T_delta_world, project3D=True)[0]
+                experiment.rearrange(live_rearrange, demo_rearrange[0].tolist(), yumi.LEFT)
+                yumi.plan_left_arm(yumi.create_pose(*bottleneck_left[:3], *bottleneck_left[3:]))
+
+            # Replay experiment
+            homVS.run()
+            T_delta_world =  yumi.get_curent_T_left() @ pose_inv(T_bottleneck_left)
+            live_waypoints = apply_transformation_to_waypoints(experiment.demo_waypoints, T_delta_world, project3D=True)
+            experiment.replay(live_waypoints)
 
     except Exception as e:
         rospy.logerr(f"Error: {e}")
@@ -64,6 +90,9 @@ if __name__ == '__main__':
     from poseEstimation import PoseEstimation
     import moveit_utils.yumi_moveit_utils as yumi
     from dinobot import DINOBotVS
+    from relative_cam_vs import RelCamVS
+    from homography_vs import HomVS
+    from trajectory_utils import apply_transformation_to_waypoints, create_homogeneous_matrix, pose_inv
 
     rospy.init_node('Base Experiment', anonymous=True)
     parser = argparse.ArgumentParser(description='Run Yumi Base Experiment.')

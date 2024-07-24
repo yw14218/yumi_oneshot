@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 
 d405_K = np.load("handeye/intrinsics_d405.npy")
 d415_K = np.load("handeye/intrinsics_d415.npy")
@@ -101,7 +102,7 @@ def find_transformation(X, Y):
 
     return R, t
 
-def solve_transform_3d(mkpts_0, mkpts_1, depth_ref, depth_cur):
+def solve_transform_3d(mkpts_0, mkpts_1, depth_ref, depth_cur, K):
     """
     Compute the 3D transformation matrix between two sets of 3D points derived from depth maps.
 
@@ -123,8 +124,8 @@ def solve_transform_3d(mkpts_0, mkpts_1, depth_ref, depth_cur):
     ValueError: If the shapes of `mkpts_0` and `mkpts_1` do not match or if the depth maps and keypoints are incompatible.
     """
     # Convert 2D keypoints and depth maps to 3D points
-    points1_3d = add_depth(mkpts_0, depth_ref)
-    points2_3d = add_depth(mkpts_1, depth_cur)
+    points1_3d = add_depth(mkpts_0, depth_ref, K)
+    points2_3d = add_depth(mkpts_1, depth_cur, K)
     
     # Compute the transformation between the two sets of 3D points
     delta_R_camera, delta_t_camera = find_transformation(points1_3d, points2_3d)
