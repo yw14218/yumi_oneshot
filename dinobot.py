@@ -9,7 +9,7 @@ from sensor_msgs.msg import Image as ImageMsg
 from DinoViT.hand_utils import extract_desc_maps, extract_descriptor_nn, draw_correspondences
 from camera_utils import solve_transform_3d, d405_K as K, d405_T_C_EEF
 from trajectory_utils import pose_inv, euler_from_quat, euler_from_matrix
-from moveit_utils.cartesian_control import YuMiCartesianController
+from moveit_utils.cartesian_control import YuMiLeftArmCartesianController
 from lightglue import LightGlue, SuperPoint, match_pair, SIFT
 import warnings
 import matplotlib.pyplot as plt
@@ -47,7 +47,7 @@ class DINOBotVS:
         self.num_patches = tuple(cache['num_patches'])
         self.mkpts_0 = None
         self.index = 0
-        self.cartesian_controller = YuMiCartesianController()
+        self.cartesian_controller = YuMiLeftArmCartesianController()
         self.dof = 3
 
         self.cap_t = 0.01

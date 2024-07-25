@@ -7,7 +7,7 @@ from PIL import Image
 from sensor_msgs.msg import Image as ImageMsg
 from camera_utils import solve_transform_3d, d405_K as K, d405_T_C_EEF
 from trajectory_utils import pose_inv, euler_from_quat, euler_from_matrix
-from moveit_utils.cartesian_control import YuMiCartesianController
+from moveit_utils.cartesian_control import YuMiLeftArmCartesianController
 from lightglue import SIFT, LightGlue
 from lightglue.utils import load_image, rbd
 from vis import visualize_convergence_on_sphere
@@ -15,20 +15,6 @@ import warnings
 import matplotlib.pyplot as plt
 warnings.filterwarnings("ignore")
 
-
-class PIDController:
-    def __init__(self, Kp, Ki, Kd):
-        self.Kp = Kp
-        self.Ki = Ki
-        self.Kd = Kd
-        self.prev_error = 0
-        self.integral = 0
-
-    def update(self, error):
-        self.integral += error
-        derivative = error - self.prev_error
-        self.prev_error = error
-        return self.Kp * error + self.Ki * self.integral + self.Kd * derivative
     
 class RelCamVS:
     def __init__(self, DIR):
@@ -41,7 +27,7 @@ class RelCamVS:
         self.height = self.depth_ref.shape[1]
 
         self.index = 0
-        self.cartesian_controller = YuMiCartesianController()
+        self.cartesian_controller = YuMiLeftArmCartesianController()
         self.dof = 3
 
         self.cap_t = 0.01

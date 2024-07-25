@@ -2,7 +2,7 @@ import rospy
 from moveit_utils.ikSolver import IKSolver
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
-class YuMiCartesianController:
+class YuMiLeftArmCartesianController:
     def __init__(self, group_name="left_arm", ik_link_name="gripper_l_base", joint_names=None, queue_size=10):
         """
         Initialize the CartesianController with an IK solver and a ROS publisher.
@@ -40,7 +40,7 @@ class YuMiCartesianController:
         msg = JointTrajectory()
         point = JointTrajectoryPoint()
         point.positions = target_joints
-        point.time_from_start = rospy.Duration(0.05)
+        point.time_from_start = rospy.Duration(0.01)
         msg.header.stamp = rospy.Time.now()
         msg.joint_names = self.joint_names
         msg.points.append(point)

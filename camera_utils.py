@@ -1,6 +1,8 @@
 import numpy as np
 import torch
 
+d405_rgb_topic_name = "d405/color/image_rect_raw"
+d405_depth_topic_name = "d405/aligned_depth_to_color/image_raw"
 d405_K = np.load("handeye/intrinsics_d405.npy")
 d415_K = np.load("handeye/intrinsics_d415.npy")
 d405_T_C_EEF = np.load("handeye/T_C_EEF_wrist_l.npy")
