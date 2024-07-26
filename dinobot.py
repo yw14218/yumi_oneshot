@@ -50,7 +50,7 @@ class DINOBotVS:
         self.cartesian_controller = YuMiLeftArmCartesianController()
         self.dof = 3
 
-        self.cap_t = 0.01
+        self.cap_t = 0.005
         self.cap_r = np.deg2rad(5)
 
         # self.extractor = SuperPoint(max_num_keypoints=1024).eval().cuda()  # load the extractor
@@ -90,31 +90,12 @@ class DINOBotVS:
         live_rgb = Image.open(live_image_dir)
 
         fig = draw_correspondences(self.mkpts_0, mkpts_1, Image.fromarray(self.rgb_ref), live_rgb, self.index)
+        plt.show()
         self.index += 1
 
         # Reverse x and y coordinates for both keypoints
         mkpts_0, mkpts_1 = self.mkpts_0[:, ::-1], mkpts_1[:, ::-1]
 
-        if filter_seg:
-            # Convert to integer coordinates for segmentation lookup
-            coords = mkpts_0.astype(int)
-            # Get segmentation values for corresponding coordinates
-            seg_values = self.seg_ref[coords[:, 1], coords[:, 0]]
-            # Filter points where segment values are True
-            mask = seg_values
-
-            mkpts_0 = mkpts_0[mask]
-            mkpts_1 = mkpts_1[mask]
-                    
-        return mkpts_0, mkpts_1
-    
-    def match_siftlg(self, live_image_dir, filter_seg=True):
-        rgb_live = np.array(Image.open(live_image_dir))
-        feats0, feats1, matches01 = match_pair(self.extractor, self.matcher, numpy_image_to_torch(self.rgb_ref), numpy_image_to_torch(rgb_live))
-        matches = matches01['matches']  # indices with shape (K,2)
-        mkpts_0 = feats0['keypoints'][matches[..., 0]].cpu().numpy()  # coordinates in image #0, shape (K,2)
-        mkpts_1 = feats1['keypoints'][matches[..., 1]].cpu().numpy()  # coordinates in image #1, shape (K,2)
-        
         if filter_seg:
             # Convert to integer coordinates for segmentation lookup
             coords = mkpts_0.astype(int)

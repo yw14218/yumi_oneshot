@@ -1,11 +1,12 @@
 import abc
 import rospy
+import torch
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 from threading import Lock, Condition
 from camera_utils import d405_rgb_topic_name, d405_depth_topic_name
 from moveit_utils.cartesian_control import YuMiLeftArmCartesianController
-from lightglue import LightGlue, SIFT
+from lightglue import LightGlue, SIFT, SuperPoint
 from lightglue.utils import numpy_image_to_torch, rbd
 
 class CartesianVisualServoer(abc.ABC):
@@ -14,7 +15,7 @@ class CartesianVisualServoer(abc.ABC):
         self.lock = Lock()
         self.condition = Condition(self.lock)
         self.cartesian_controller = YuMiLeftArmCartesianController()
-        self.rgb_subscriber = rospy.Subscriber(d405_rgb_topic_name, Image, self.image_callback)
+        self.rgb_subscriber = rospy.Subscriber(d405_rgb_topic_name, Image, self.rgb_image_callback)
 
         self.images = {
             "rgb": None,
@@ -23,15 +24,23 @@ class CartesianVisualServoer(abc.ABC):
         self.use_depth = use_depth
 
         if self.use_depth:
-            self.depth_subscriber = rospy.Subscriber(d405_depth_topic_name, Image, self.image_callback)
+            self.depth_subscriber = rospy.Subscriber(d405_depth_topic_name, Image, self.depth_image_callback)
 
-    def image_callback(self, msg):
+    def rgb_image_callback(self, msg):
         with self.lock:
-            if msg.header.frame_id == d405_rgb_topic_name:
+            try:
                 self.images["rgb"] = self.bridge.imgmsg_to_cv2(msg, "rgb8")
-            elif self.use_depth and msg.header.frame_id == d405_depth_topic_name:
+                self.condition.notify_all()
+            except Exception as e:
+                rospy.logerr(f"Error in rgb_image_callback: {e}")
+
+    def depth_image_callback(self, msg):
+        with self.lock:
+            try:
                 self.images["depth"] = self.bridge.imgmsg_to_cv2(msg, "32FC1")
-            self.condition.notify_all()
+                self.condition.notify_all()
+            except Exception as e:
+                rospy.logerr(f"Error in depth_image_callback: {e}")
 
     def observe(self):
         with self.lock:
@@ -56,17 +65,19 @@ class CartesianVisualServoer(abc.ABC):
 
         return (live_rgb, live_depth) if self.use_depth else (live_rgb, None)
     
-    @abc.abstractmethod
-    def run(self):
-        """Run the visual servoing loop."""
-        pass
+    # @abc.abstractmethod
+    # def run(self):
+    #     """Run the visual servoing loop."""
+    #     pass
 
 class SiftLightGlueVisualServoer(CartesianVisualServoer):
     def __init__(self, rgb_ref, seg_ref, use_depth=False):
         super().__init__(use_depth=use_depth)
 
-        self.extractor = SIFT(backend='pycolmap', max_num_keypoints=1024).eval().cuda()
-        self.matcher = LightGlue(features='sift', depth_confidence=-1, width_confidence=-1).eval().cuda()
+        # self.extractor = SIFT(backend='pycolmap', max_num_keypoints=1024).eval().cuda()
+        # self.matcher = LightGlue(features='sift', depth_confidence=-1, width_confidence=-1).eval().cuda()
+        self.extractor = SuperPoint(max_num_keypoints=1024).eval().cuda()  # load the extractor
+        self.matcher = LightGlue(features='superpoint', depth_confidence=-1, width_confidence=-1).eval().cuda()  # load the matcher
         self.feats0 = self.extractor.extract(numpy_image_to_torch(rgb_ref))
         self.seg_ref = seg_ref
 
@@ -79,11 +90,18 @@ class SiftLightGlueVisualServoer(CartesianVisualServoer):
         feats1 = self.extractor.extract(numpy_image_to_torch(live_rgb))
         matches01 = self.matcher({'image0': self.feats0, 'image1': feats1})
 
-        feats0, feats1, matches01 = [self.rbd(x) for x in [self.feats0, feats1, matches01]]
-        matches = matches01['matches']
-
+        feats0, feats1, matches01 = [rbd(x) for x in [self.feats0, feats1, matches01]]
+        matches, scores = matches01['matches'], matches01['scores']
         mkpts_0 = feats0['keypoints'][matches[..., 0]].cpu().numpy()
         mkpts_1 = feats1['keypoints'][matches[..., 1]].cpu().numpy()
+
+        assert scores.shape[0] == mkpts_0.shape[0]
+        if scores.shape[0] == 0:
+            return None, None, None, None
+        
+        highest_score, index_of_highest_score = torch.max(scores, 0)
+
+        assert index_of_highest_score < scores.shape[0]
 
         if filter_seg:
             coords = mkpts_0.astype(int)
@@ -93,8 +111,8 @@ class SiftLightGlueVisualServoer(CartesianVisualServoer):
             mkpts_0 = mkpts_0[mask]
             mkpts_1 = mkpts_1[mask]
 
-        return mkpts_0, mkpts_1, live_depth
-    
+        return mkpts_0, mkpts_1, live_depth, index_of_highest_score.cpu().numpy()
+
 class PIDController:
     def __init__(self, Kp, Ki, Kd):
         self.Kp = Kp
@@ -108,3 +126,23 @@ class PIDController:
         derivative = error - self.prev_error
         self.prev_error = error
         return self.Kp * error + self.Ki * self.integral + self.Kd * derivative
+
+if __name__ == "__main__":
+    import cv2
+    rospy.init_node('sift_lightglue_visual_servoer', anonymous=True)
+
+    dir = "experiments/pencil_sharpener"
+    # Load the reference RGB image and segmentation mask
+    rgb_ref = cv2.imread(f"{dir}/demo_wrist_rgb.png")[...,::-1].copy()
+    seg_ref = cv2.imread(f"{dir}/demo_wrist_seg.png", cv2.IMREAD_GRAYSCALE).astype(bool)
+
+    # Initialize the visual servoer with reference images
+    visual_servoer = SiftLightGlueVisualServoer(rgb_ref, seg_ref, use_depth=True)
+
+    try:
+        while not rospy.is_shutdown():
+            mkpts_0, mkpts_1, live_depth, index = visual_servoer.match_siftlg(filter_seg=True)
+            rospy.loginfo(f"Matched keypoints: {len(mkpts_0)}")
+            rospy.sleep(1)  # Adjust sleep time as needed
+    except rospy.ROSInterruptException:
+        pass

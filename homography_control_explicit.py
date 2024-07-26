@@ -8,18 +8,18 @@ from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from cv_bridge import CvBridge, CvBridgeError
 from scipy.spatial.transform import Rotation
 from trajectory_utils import *
-from ikSolver import IKSolver
+from moveit_utils.ikSolver import IKSolver
 import poselib
 from poseEstimation import PoseEstimation
 import json
 import time
 from threading import Event, Lock
-from camera_utils import convert_from_uvd, d405_K as K, d405_T_C_EEF as T_C_EEF
+from camera_utils import d405_K as K, d405_T_C_EEF as T_C_EEF
 from matplotlib import pyplot as plt
 from matplotlib import gridspec
-from lightglue import LightGlue, SuperPoint, match_pair
+from lightglue import LightGlue, SuperPoint, SIFT, match_pair
 from geometry_msgs.msg import geometry_msgs
-import yumi_moveit_utils as yumi
+import moveit_utils.yumi_moveit_utils as yumi
 import matplotlib.pyplot as plt
 from vis import *
 from collections import deque
@@ -166,9 +166,12 @@ publisher_left = rospy.Publisher("/yumi/joint_traj_pos_controller_l/command", Jo
 ik_solver_left = IKSolver(group_name="left_arm", ik_link_name="gripper_l_base")
 imageListener = ImageListener(batch_size=1)
 
-DIR = "experiments/pencile_sharpener"
+DIR = "experiments/pencil_sharpener"
 OBJ = "blue pencile sharpener"
-# from experiments.pencile_sharpener.experiment import SharpenerExperiment as Experiment
+
+DIR = "experiments/scissor"
+OBJ = "black scissor"
+
 
 # DIR = "experiments/wood"
 # OBJ = "wooden stand"
@@ -202,6 +205,8 @@ stab_point_2D_np = np.array(stab_point_2D, dtype=np.float32).reshape(-1, 1, 2)
 # SuperPoint+LightGlue
 extractor = SuperPoint(max_num_keypoints=1024).eval().cuda()  # load the extractor
 matcher = LightGlue(features='superpoint', depth_confidence=-1, width_confidence=-1).eval().cuda()  # load the matcher
+# extractor = SIFT(max_num_keypoints=1024, backend='pycolmap').eval().cuda()
+# matcher = LightGlue(features='sift', depth_confidence=-1, width_confidence=-1).eval().cuda()  # load the matcher
 demo_rgb = cv2.imread(f"{DIR}/demo_wrist_rgb.png")[..., ::-1].copy() 
 demo_seg = cv2.imread(f"{DIR}/demo_wrist_seg.png")
 demo_rgb_cuda = imageListener.numpy_image_to_torch(demo_rgb * demo_seg.astype(bool))
@@ -209,7 +214,7 @@ demo_rgb_cuda = imageListener.numpy_image_to_torch(demo_rgb * demo_seg.astype(bo
 yumi.init_Moveit()
 
 # yumi.reset_init()
-bottleneck_left[2] += 0.05
+# bottleneck_left[2] += 0.05
 yumi.plan_left_arm(yumi.create_pose(*bottleneck_left))
 user_input = input("Continue? (yes/no): ").lower()
 if user_input == "ready":
@@ -243,7 +248,7 @@ class PIDController:
         self.prev_error = error
         return self.Kp * error + self.Ki * self.integral + self.Kd * derivative
     
-def iterative_learning_control(demo_pixel, K, stab_3d_cam, max_iterations=200, threshold=0.1):
+def iterative_learning_control(demo_pixel, K, stab_3d_cam, max_iterations=150, threshold=0.1):
     current_pose = yumi.get_current_pose(yumi.LEFT).pose
     current_rpy = euler_from_quat([current_pose.orientation.x, current_pose.orientation.y, current_pose.orientation.z, current_pose.orientation.w])
     control_input_x = 0
@@ -281,7 +286,7 @@ def iterative_learning_control(demo_pixel, K, stab_3d_cam, max_iterations=200, t
         control_input_x = pid_x.update(delta_X)
         control_input_y = pid_y.update(delta_Y)
         control_input_z_rot = pid_theta.update(delta_rz)
-        control_input_z = pid_z.update(delta_z)
+        # control_input_z = pid_z.update(delta_z)
         
 
         # if abs(control_input_x) >= 0.002:
@@ -290,15 +295,15 @@ def iterative_learning_control(demo_pixel, K, stab_3d_cam, max_iterations=200, t
         #     control_input_y = 0.002 if control_input_y > 0 else -0.002
         # if abs(control_input_z_rot) >= 0.02:
         #     control_input_z_rot = 0.02 if control_input_z_rot > 0 else -0.02
-        if abs(control_input_z) >= 0.001:
-            control_input_z = 0.001 if control_input_z > 0 else -0.001
+        # if abs(control_input_z) >= 0.001:
+        #     control_input_z = 0.001 if control_input_z > 0 else -0.001
 
-        rospy.loginfo(f"Step {iteration + 1}, Error is : {error:.4g}, delta_x: {control_input_x:.4g}, delta_y: {control_input_y:.4g}, delta_z: {control_input_z:.4g}, delta_yaw: {np.degrees(delta_rz)}")
+        rospy.loginfo(f"Step {iteration + 1}, Error is : {error:.4g}, delta_x: {control_input_x:.4g}, delta_y: {control_input_y:.4g}")
     
         # Move robot by the updated control input
         current_pose.position.x += control_input_x
         current_pose.position.y -= control_input_y
-        current_pose.position.z -= control_input_z
+        # current_pose.position.z -= control_input_z
         current_rpy[-1] -= control_input_z_rot
         
         trajectory.append([current_pose.position.x, current_pose.position.y, np.degrees(current_rpy[-1])])
@@ -307,6 +312,7 @@ def iterative_learning_control(demo_pixel, K, stab_3d_cam, max_iterations=200, t
 
         move_eef(new_pose)
 
+    # np.save("trajectory_hom_no_depth.npy", np.array(trajectory))
     visualize_convergence_on_sphere(np.array(trajectory))
     
     return current_pose

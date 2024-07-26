@@ -42,13 +42,13 @@ def main(dir):
     #     text_prompt=experiment.object,
     #     visualize=False)
     
-    # dinoBotVS = DINOBotVS(dir)
-    # relCamVS = RelCamVS(dir)
+    dinoBotVS = DINOBotVS(dir)
+    relCamVS = RelCamVS(dir)
     homVS = HomVS(dir)
 
     # Initialize Moveit
     yumi.init_Moveit()
-    yumi.reset_init()
+    # yumi.reset_init()
 
     bottleneck_left = experiment.demo_waypoints[0].tolist()
     T_bottleneck_left = create_homogeneous_matrix(bottleneck_left[:3], bottleneck_left[3:])
@@ -65,22 +65,23 @@ def main(dir):
             yumi.plan_left_arm(yumi.create_pose(*bottleneck_left[:3], *bottleneck_left[3:]))
             # user_input = input("Proceed with waypoint transformation? (yes/no): ").strip().lower()
             # del pose_estimator
-            homVS.run()
-    
-            T_delta_world =  yumi.get_curent_T_left() @ pose_inv(T_bottleneck_left)
-            rz = np.rad2deg(euler_from_matrix(T_delta_world)[-1])
-            if abs(rz) > 50:
-                # Rearrange experiment
-                demo_rearrange = experiment.rearrange_waypoints
-                live_rearrange = apply_transformation_to_waypoints(demo_rearrange, T_delta_world, project3D=True)[0]
-                experiment.rearrange(live_rearrange, demo_rearrange[0].tolist(), yumi.LEFT)
-                yumi.plan_left_arm(yumi.create_pose(*bottleneck_left[:3], *bottleneck_left[3:]))
+            # homVS.run()
+            relCamVS.run()
+            # T_delta_world =  yumi.get_curent_T_left() @ pose_inv(T_bottleneck_left)
+            # rz = np.rad2deg(euler_from_matrix(T_delta_world)[-1])
+            # if abs(rz) > 50:
+            #     # Rearrange experiment
+            #     demo_rearrange = experiment.rearrange_waypoints
+            #     live_rearrange = apply_transformation_to_waypoints(demo_rearrange, T_delta_world, project3D=True)[0]
+            #     experiment.rearrange(live_rearrange, demo_rearrange[0].tolist(), yumi.LEFT)
+            #     yumi.plan_left_arm(yumi.create_pose(*bottleneck_left[:3], *bottleneck_left[3:]))
 
-            # Replay experiment
-            homVS.run()
-            T_delta_world =  yumi.get_curent_T_left() @ pose_inv(T_bottleneck_left)
-            live_waypoints = apply_transformation_to_waypoints(experiment.demo_waypoints, T_delta_world, project3D=True)
-            experiment.replay(live_waypoints)
+            # # Replay experiment
+            # homVS.run()
+            # T_delta_world =  yumi.get_curent_T_left() @ pose_inv(T_bottleneck_left)
+            # live_waypoints = apply_transformation_to_waypoints(experiment.demo_waypoints, T_delta_world, project3D=True)
+            # experiment.replay(live_waypoints)ea
+            break
 
     except Exception as e:
         rospy.logerr(f"Error: {e}")
