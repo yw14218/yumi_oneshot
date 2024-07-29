@@ -1,13 +1,17 @@
 import abc
 import rospy
 import torch
+import numpy as np
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 from threading import Lock, Condition
 from camera_utils import d405_rgb_topic_name, d405_depth_topic_name
+from trajectory_utils import pose_inv
 from moveit_utils.cartesian_control import YuMiLeftArmCartesianController
 from lightglue import LightGlue, SIFT, SuperPoint
 from lightglue.utils import numpy_image_to_torch, rbd
+from mini_dust3r.api import OptimizedResult, inferece_dust3r, log_optimized_result
+from mini_dust3r.model import AsymmetricCroCo3DStereo
 
 class CartesianVisualServoer(abc.ABC):
     def __init__(self, use_depth=False):        
@@ -113,6 +117,38 @@ class SiftLightGlueVisualServoer(CartesianVisualServoer):
 
         return mkpts_0, mkpts_1, live_depth, index_of_highest_score.cpu().numpy()
 
+class Dust3RisualServoer(CartesianVisualServoer):
+    def __init__(self, rgb_ref, use_depth=False):
+        super().__init__(use_depth=use_depth)
+
+        self.rgb_ref = rgb_ref
+        if torch.backends.mps.is_available():
+            device = "mps"
+        elif torch.cuda.is_available():
+            device = "cuda"
+        else:
+            device = "cpu"
+        self.model = AsymmetricCroCo3DStereo.from_pretrained(
+            "nielsr/DUSt3R_ViTLarge_BaseDecoder_512_dpt"
+        ).to(device)
+
+    def estimate_rel_pose(self):
+        live_rgb, live_depth = self.observe()
+        res = inferece_dust3r(
+            image_dir_or_list=[self.rgb_ref, live_rgb],
+            model=self.model,
+            device="cuda",
+            batch_size=1
+        )
+        T_0, T_1 = res.world_T_cam_b44[0], res.world_T_cam_b44[1]
+        print(T_0, T_1)
+        if np.allclose(T_1, np.eye(4)):
+            T = T_0
+        else:
+            T = pose_inv(T_1)
+        
+        return T
+    
 class PIDController:
     def __init__(self, Kp, Ki, Kd):
         self.Kp = Kp
@@ -137,12 +173,15 @@ if __name__ == "__main__":
     seg_ref = cv2.imread(f"{dir}/demo_wrist_seg.png", cv2.IMREAD_GRAYSCALE).astype(bool)
 
     # Initialize the visual servoer with reference images
-    visual_servoer = SiftLightGlueVisualServoer(rgb_ref, seg_ref, use_depth=True)
+    # visual_servoer = SiftLightGlueVisualServoer(rgb_ref, seg_ref, use_depth=True)
+    visual_servoer = Dust3RisualServoer(rgb_ref) 
 
     try:
         while not rospy.is_shutdown():
-            mkpts_0, mkpts_1, live_depth, index = visual_servoer.match_siftlg(filter_seg=True)
-            rospy.loginfo(f"Matched keypoints: {len(mkpts_0)}")
+            # mkpts_0, mkpts_1, live_depth, index = visual_servoer.match_siftlg(filter_seg=True)
+            T = visual_servoer.estimate_rel_pose()
+            # rospy.loginfo(f"Matched keypoints: {len(mkpts_0)}")
+            # rospy.loginfo(T)
             rospy.sleep(1)  # Adjust sleep time as needed
     except rospy.ROSInterruptException:
         pass
