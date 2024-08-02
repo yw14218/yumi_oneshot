@@ -96,7 +96,123 @@ def robust_alignment_check(source, target):
         centroid_diff = centroid_difference(source, target)
         is_off = centroid_diff > 0.1  # Adjust this threshold as needed
         return is_off, "Fallback to centroid difference", {'centroid_difference': centroid_diff}
+from filterpy.kalman import UnscentedKalmanFilter as UKF
+from filterpy.kalman import MerweScaledSigmaPoints
+import numpy as np
+from scipy.spatial.transform import Rotation as R
 
+class PBVS_UKF:
+    def __init__(self, initial_state, d405_T_C_EEF, cap_t, cap_r):
+        self.cap_t = cap_t
+        self.cap_r = cap_r
+        self.d405_T_C_EEF = d405_T_C_EEF  # Hand-eye calibration matrix
+        
+        # Define UKF parameters
+        dim_x = 6  # State dimension [x, y, z, roll, pitch, yaw]
+        dim_z = 6  # Measurement dimension
+        points = MerweScaledSigmaPoints(n=dim_x, alpha=0.1, beta=2., kappa=-3)
+        self.ukf = UKF(dim_x=dim_x, dim_z=dim_z, fx=self.fx, hx=self.hx, points=points)
+        self.ukf.x = initial_state  # Initial state (relative pose)
+        self.ukf.P *= 0.1  # Initial covariance
+        self.ukf.Q *= 0.01  # Process noise
+        self.base_R = np.eye(6) * 0.01  # Base measurement noise
+        
+        self.distance_threshold = 0.5  # Threshold for adaptive measurement noise
+        self.R_scale_factor = 10  # Maximum scale factor for measurement noise
+        self.gain = 0.1  # Control gain
+
+    def fx(self, x, dt):
+        """State transition function: simple constant pose model."""
+        return x  # Assuming no inherent dynamics, control input applied separately
+
+    def hx(self, x):
+        """Measurement function: convert relative end-effector pose to camera frame."""
+        T_eef = self.state_to_transform(x)
+        T_cam = np.linalg.inv(self.d405_T_C_EEF) @ T_eef @ self.d405_T_C_EEF
+        return self.transform_to_state(T_cam)
+
+    def state_to_transform(self, state):
+        """Convert state vector [x, y, z, roll, pitch, yaw] to transformation matrix."""
+        t = state[:3]
+        r = R.from_euler('xyz', state[3:], degrees=False).as_matrix()
+        T = np.eye(4)
+        T[:3, :3] = r
+        T[:3, 3] = t
+        return T
+
+    def transform_to_state(self, T):
+        """Convert transformation matrix to state vector [x, y, z, roll, pitch, yaw]."""
+        t = T[:3, 3]
+        r = R.from_matrix(T[:3, :3]).as_euler('xyz', degrees=False)
+        return np.concatenate((t, r))
+
+    def update_measurement_noise(self, distance):
+        """Update measurement noise covariance based on distance to workspace."""
+        scale = 1 + (self.R_scale_factor - 1) * min(max(distance - self.distance_threshold, 0) / self.distance_threshold, 1)
+        self.ukf.R = self.base_R * scale
+
+    def compute_control_input(self, state):
+        """Compute control input based on the current state estimate."""
+        translation = state[:3]
+        rotation = state[3:]
+        control_input = np.concatenate([
+            np.clip(self.gain * translation, -self.cap_t, self.cap_t),
+            np.clip(self.gain * rotation, -self.cap_r, self.cap_r)
+        ])
+        return control_input
+
+    def run(self):
+        error = float('inf')
+        trajectory = []
+        num_iteration = 0
+
+        while error > 0.005:
+            # Step 1: Predict the next state
+            self.ukf.predict()
+            
+            # Step 2: Get new measurement
+            T_delta_cam = self.estimate_rel_pose()  # This function needs to be implemented
+            measurement = self.transform_to_state(T_delta_cam)
+            
+            # Step 3: Update measurement noise based on distance
+            distance = np.linalg.norm(measurement[:3])
+            self.update_measurement_noise(distance)
+            
+            # Step 4: Update the filter with the new measurement
+            self.ukf.update(measurement)
+            
+            # Step 5: Get the current state estimate
+            current_state = self.ukf.x
+            
+            # Step 6: Compute control input based on the current state estimate
+            control_input = self.compute_control_input(current_state)
+            
+            # Step 7: Apply control input to the robot
+            T_eef_world = yumi.get_curent_T_left()
+            T_delta_eef = self.state_to_transform(control_input)
+            T_eef_world_new = T_eef_world @ T_delta_eef
+            
+            # Extract new pose
+            new_position = T_eef_world_new[:3, 3]
+            new_orientation = R.from_matrix(T_eef_world_new[:3, :3]).as_euler('xyz', degrees=False)
+            
+            # Construct the new end-effector pose
+            eef_pose = yumi.create_pose_euler(new_position[0], new_position[1], new_position[2],
+                                              new_orientation[0], new_orientation[1], new_orientation[2])
+            
+            # Move the end-effector to the new pose
+            self.cartesian_controller.move_eef(eef_pose)
+            
+            # Record the trajectory for analysis
+            trajectory.append([new_position[0], new_position[1], np.degrees(new_orientation[2])])
+            
+            # Update error and iteration count
+            error = np.linalg.norm(current_state[:3])  # Use the estimated relative position as error
+            num_iteration += 1
+            print(f"Iteration {num_iteration}: Error {error}")
+
+        return trajectory
+        
 # Example usage
 if __name__ == "__main__":
     # Load or create sample point clouds
