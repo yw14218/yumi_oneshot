@@ -51,6 +51,31 @@ def create_homogeneous_matrix(xyz, quaternion):
     T[:3, 3] = xyz  # Insert the translation vector
 
     return T
+
+def create_homogeneous_matrix_euler(xyz, euler):
+    # Convert the quaternion to a rotation matrix
+    rotation_matrix = R.from_euler('xyz', euler).as_matrix()
+    # Create a homogeneous transformation matrix
+    T = np.eye(4)  # Start with an identity matrix
+    T[:3, :3] = rotation_matrix  # Insert the rotation matrix
+    T[:3, 3] = xyz  # Insert the translation vector
+
+    return T
+
+def state_to_transform(state):
+    """Convert state vector [x, y, z, roll, pitch, yaw] to transformation matrix."""
+    t = state[:3]
+    r = R.from_euler('xyz', state[3:], degrees=False).as_matrix()
+    T = np.eye(4)
+    T[:3, :3] = r
+    T[:3, 3] = t
+    return T
+
+def transform_to_state(T):
+    """Convert transformation matrix to state vector [x, y, z, roll, pitch, yaw]."""
+    t = T[:3, 3]
+    r = R.from_matrix(T[:3, :3]).as_euler('xyz', degrees=False)
+    return np.concatenate((t, r))
     
 def translation_from_matrix(matrix):
     """Extracts the translation vector from a 4x4 homogeneous transformation matrix."""

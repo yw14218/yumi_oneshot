@@ -9,6 +9,7 @@ from langSAM import LangSAMProcessor
 from trajectory_utils import euler_from_matrix
 from scipy.spatial.transform import Rotation as R
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pc_valid import robust_alignment_check
 
 class PoseEstimation:
     def __init__(self, dir, text_prompt, visualize):
@@ -405,37 +406,118 @@ class ProbPPR:
             pcd0.points = o3d.utility.Vector3dVector(data["pc0"][:, :3])
             pcd1.points = o3d.utility.Vector3dVector(data["pc1"][:, :3])
 
-            source_down = self.preprocess_point_cloud(pcd0)
-            target_down = self.preprocess_point_cloud(pcd1)
+            # Define grid search parameters
+            voxel_sizes = [0.001, 0.01, 0.1]  # 0.1 cm, 1 cm, 10 cm
+            correspondence_distances = [0.01, 0.05, 0.1]  # 1 cm, 5 cm, 10 cm
 
-            if source_down is None or target_down is None:
-                raise ValueError("Preprocessing failed")
+            best_fitness = -np.inf
+            best_rmse = np.inf
+            best_transformation = None
 
-            source_fpfh = self.compute_fpfh_features(source_down)
-            target_fpfh = self.compute_fpfh_features(target_down)
+            MIN_POINTS = 10
+            for voxel_size in voxel_sizes:
+                self.voxel_size = voxel_size
+                source_down = self.preprocess_point_cloud(pcd0)
+                target_down = self.preprocess_point_cloud(pcd1)
 
-            if source_fpfh is None or target_fpfh is None:
-                raise ValueError("Feature computation failed")
+                if source_down is None or target_down is None:
+                    raise ValueError("Preprocessing failed")
 
-            result_fgr = self.execute_fast_global_registration(source_down, target_down, source_fpfh, target_fpfh)
+                source_fpfh = self.compute_fpfh_features(source_down)
+                target_fpfh = self.compute_fpfh_features(target_down)
 
-            if result_fgr is None:
-                raise ValueError("Fast Global Registration failed")
+                if source_fpfh is None or target_fpfh is None:
+                    raise ValueError("Feature computation failed")
 
-            result_icp = o3d.pipelines.registration.registration_icp(
-                source_down, target_down, self.voxel_size, result_fgr.transformation,
-                o3d.pipelines.registration.TransformationEstimationPointToPlane())
+                if source_fpfh is None or target_fpfh is None or source_fpfh.data.shape[1] == 0 or target_fpfh.data.shape[1] == 0:
+                    print(f"Skipping voxel_size {voxel_size}: Computed FPFH features are empty.")
+                    continue
+
+                if source_fpfh.data.shape[1] < MIN_POINTS or target_fpfh.data.shape[1] < MIN_POINTS:
+                    print(f"Skipping voxel_size {voxel_size}: Not enough features after computation.")
+                    continue
+
+                # Perform Fast Global Registration (FGR)
+                try:
+                    result_fgr = self.execute_fast_global_registration(source_down, target_down, source_fpfh, target_fpfh)
+                except Exception as e:
+                    print(f"Error in execute_fast_global_registration: {e}")
+                    continue
+                
+                if result_fgr is None:
+                    print("An error occurred in main: 'NoneType' object has no attribute 'fitness'")
+                    continue
+
+                # Record FGR results
+                current_fitness = result_fgr.fitness
+                current_rmse = result_fgr.inlier_rmse
+                current_transformation = result_fgr.transformation
+
+                # Compare with the best found so far
+                if current_fitness > best_fitness or (current_fitness == best_fitness and current_rmse < best_rmse):
+                    best_fitness = current_fitness
+                    best_rmse = current_rmse
+                    best_transformation = current_transformation
+
+                # Refine the transformation using ICP
+                for max_corr_dist in correspondence_distances:
+                    result_icp = o3d.pipelines.registration.registration_icp(
+                        source_down, target_down, max_corr_dist, current_transformation,
+                        o3d.pipelines.registration.TransformationEstimationPointToPoint())
+                    
+                    if result_icp is None:
+                        raise ValueError("ICP failed")
+
+                    # Evaluate ICP results
+                    current_fitness = result_icp.fitness
+                    current_rmse = result_icp.inlier_rmse
+                    current_transformation = result_icp.transformation
+
+                    # Check if this result is better based on both fitness and RMSE
+                    if current_fitness > best_fitness or (current_fitness == best_fitness and current_rmse < best_rmse):
+                        best_fitness = current_fitness
+                        best_rmse = current_rmse
+                        best_transformation = current_transformation
+
+            # source_pcd_np = np.asarray(pcd0.points)
+            # target_pcd_np = np.asarray(pcd1.points)
+
+            # # Convert the NumPy arrays to Open3D tensors
+            # source_pcd_tensor = o3d.core.Tensor(source_pcd_np, dtype=o3d.core.float32)
+            # target_pcd_tensor = o3d.core.Tensor(target_pcd_np, dtype=o3d.core.float32)
+
+            # # Initialize PointClouds with the tensor positions
+            # source_pcd = o3d.t.geometry.PointCloud(source_pcd_tensor)
+            # target_pcd = o3d.t.geometry.PointCloud(target_pcd_tensor)
+
+            # information_matrix = o3d.t.pipelines.registration.get_information_matrix(source_pcd, target_pcd, 0.005, result_icp.transformation)
+            # # print(information_matrix)
 
             mean_transformation, covariance_matrix = self.estimate_registration_uncertainty(
-                source_down, target_down, result_icp.transformation)
+                source_down, target_down, best_transformation)
+
+            # source = o3d.geometry.PointCloud()
+            # target = o3d.geometry.PointCloud()
+            # source.points = o3d.utility.Vector3dVector(data["pc0"][:, :3])
+            # target.points = o3d.utility.Vector3dVector(data["pc1"][:, :3])
+            # # Perform robust alignment check
+            # is_off, reason, metrics = robust_alignment_check(source, target, best_transformation, best_fitness)
+            
+            # print("Alignment Metrics:")
+            # for key, value in metrics.items():
+            #     print(f"{key}: {value:.4f}")
+            
+            # print(f"\nIs alignment extremely off? {'Yes' if is_off else 'No'}")
+            # print(f"Reason: {reason}")
 
             if mean_transformation is None or covariance_matrix is None:
                 raise ValueError("Uncertainty estimation failed")
 
+            print(covariance_matrix)
             if visualize:
-                self.draw_registration_result(pcd0, pcd1, mean_transformation)
+                self.draw_registration_result(pcd0, pcd1, best_transformation)
 
-            return mean_transformation, covariance_matrix
+            return best_transformation, covariance_matrix
 
         except Exception as e:
             print(f"An error occurred in main: {e}")

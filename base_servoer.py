@@ -69,32 +69,40 @@ class CartesianVisualServoer(abc.ABC):
 
         return (live_rgb, live_depth) if self.use_depth else (live_rgb, None)
     
-    # @abc.abstractmethod
-    # def run(self):
-    #     """Run the visual servoing loop."""
-    #     pass
+    @abc.abstractmethod
+    def run(self):
+        """Run the visual servoing loop."""
+        pass
 
-class SiftLightGlueVisualServoer(CartesianVisualServoer):
+class LightGlueVisualServoer(CartesianVisualServoer):
     def __init__(self, rgb_ref, seg_ref, use_depth=False):
         super().__init__(use_depth=use_depth)
 
-        # self.extractor = SIFT(backend='pycolmap', max_num_keypoints=1024).eval().cuda()
-        # self.matcher = LightGlue(features='sift', depth_confidence=-1, width_confidence=-1).eval().cuda()
-        self.extractor = SuperPoint(max_num_keypoints=1024).eval().cuda()  # load the extractor
-        self.matcher = LightGlue(features='superpoint', depth_confidence=-1, width_confidence=-1).eval().cuda()  # load the matcher
-        self.feats0 = self.extractor.extract(numpy_image_to_torch(rgb_ref))
+        self.extractor_sift = SIFT(backend='pycolmap', max_num_keypoints=1024).eval().cuda()
+        self.matcher_sift = LightGlue(features='sift', depth_confidence=-1, width_confidence=-1).eval().cuda()
+
+        # self.extractor_sp = SuperPoint(max_num_keypoints=1024).eval().cuda()
+        # self.matcher_sp = LightGlue(features='superpoint', depth_confidence=-1, width_confidence=-1).eval().cuda() 
+        
+        self.feats0_sift = self.extractor_sift.extract(numpy_image_to_torch(rgb_ref))
+        # self.feats0_sp = self.extractor_sp.extract(numpy_image_to_torch(rgb_ref))
         self.seg_ref = seg_ref
 
-    def match_siftlg(self, filter_seg=True):
+    def match_lightglue(self, filter_seg=True, feature='sift'):
         live_rgb, live_depth = self.observe()
 
         if live_rgb is None:
             raise RuntimeError("No image received. Please check the camera and topics.")
 
-        feats1 = self.extractor.extract(numpy_image_to_torch(live_rgb))
-        matches01 = self.matcher({'image0': self.feats0, 'image1': feats1})
+        if feature == 'sift':
+            feats1 = self.extractor_sift.extract(numpy_image_to_torch(live_rgb))
+            matches01 = self.matcher_sift({'image0': self.feats0_sift, 'image1': feats1})
+            feats0, feats1, matches01 = [rbd(x) for x in [self.feats0_sift, feats1, matches01]]
+        elif feature == 'superpoint':
+            feats1 = self.extractor_sp.extract(numpy_image_to_torch(live_rgb))
+            matches01 = self.matcher_sp({'image0': self.feats0_sp, 'image1': feats1})
+            feats0, feats1, matches01 = [rbd(x) for x in [self.feats0_sp, feats1, matches01]]
 
-        feats0, feats1, matches01 = [rbd(x) for x in [self.feats0, feats1, matches01]]
         matches, scores = matches01['matches'], matches01['scores']
         mkpts_0 = feats0['keypoints'][matches[..., 0]].cpu().numpy()
         mkpts_1 = feats1['keypoints'][matches[..., 1]].cpu().numpy()
@@ -140,8 +148,7 @@ class Dust3RisualServoer(CartesianVisualServoer):
             device="cuda",
             batch_size=1
         )
-        T_0, T_1 = res.world_T_cam_b44[0], res.world_T_cam_b44[1]
-        print(T_0, T_1)
+        T_0, T_1 = res[0], res[1]
         if np.allclose(T_1, np.eye(4)):
             T = T_0
         else:
@@ -167,7 +174,7 @@ if __name__ == "__main__":
     import cv2
     rospy.init_node('sift_lightglue_visual_servoer', anonymous=True)
 
-    dir = "experiments/pencil_sharpener"
+    dir = "experiments/scissor"
     # Load the reference RGB image and segmentation mask
     rgb_ref = cv2.imread(f"{dir}/demo_wrist_rgb.png")[...,::-1].copy()
     seg_ref = cv2.imread(f"{dir}/demo_wrist_seg.png", cv2.IMREAD_GRAYSCALE).astype(bool)
