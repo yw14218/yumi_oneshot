@@ -45,7 +45,7 @@ def add_depth(mkpts, depth, K):
     depth_values = depth[mkpts[:, 1].astype(int), mkpts[:, 0].astype(int)]
     points_3ds = normalized_mkpts * depth_values[:, np.newaxis] / 1000
     
-    return points_3ds, normalized_mkpts
+    return points_3ds
 
 def compute_transform_least_square(X, Y):
     """
@@ -191,7 +191,7 @@ def find_transformation(X, Y, max_iterations=100, threshold=0.005, random_state=
 
     return best_R, best_t
 
-def solve_transform_3d(mkpts_0, mkpts_1, depth_ref, depth_cur, K, compute_homography=True):
+def solve_transform_3d(mkpts_0, mkpts_1, depth_ref, depth_cur, K):
     """
     Compute the 3D transformation matrix between two sets of 3D points derived from depth maps.
 
@@ -213,29 +213,52 @@ def solve_transform_3d(mkpts_0, mkpts_1, depth_ref, depth_cur, K, compute_homogr
     ValueError: If the shapes of `mkpts_0` and `mkpts_1` do not match or if the depth maps and keypoints are incompatible.
     """
     # Convert 2D keypoints and depth maps to 3D points
-    mkpts_0_3d, normalize_mkpts_0 = add_depth(mkpts_0, depth_ref, K)
-    mkpts_1_3d, normalize_mkpts_1 = add_depth(mkpts_1, depth_cur, K)
+    mkpts_0_3d = add_depth(mkpts_0, depth_ref, K)
+    mkpts_1_3d = add_depth(mkpts_1, depth_cur, K)
     
     # Compute the transformation between the two sets of 3D points
     delta_R_camera, delta_t_camera = find_transformation(mkpts_0_3d, mkpts_1_3d)
 
-    H_norm = None
-    if compute_homography is True:
-        H_norm, _ = cv2.findHomography(normalize_mkpts_0, normalize_mkpts_1, cv2.USAC_MAGSAC, 0.001, confidence=0.99999)
-        if H_norm is not None:
-            H = K @ H_norm @ np.linalg.inv(K)
-            selected_R, selected_t = homography_test(H, mkpts_0, mkpts_1, K)
-            # If a valid homography decomposition exists, use it and scale the translation
-            if selected_R is not None and selected_t is not None:
-                delta_R_camera = selected_R
-                # delta_t_camera = selected_t * (np.linalg.norm(delta_t_camera) / np.linalg.norm(selected_t))
-
-        # Create a 4x4 transformation matrix
+    # Create a 4x4 transformation matrix
     T_est = np.eye(4)
     T_est[:3, :3] = delta_R_camera
     T_est[:3, 3] = delta_t_camera
     
-    return T_est, H_norm
+    return T_est
+
+def compute_homography(mkpts_0, mkpts_1, depth_cur, K):
+    # Normalize keypoints using camera intrinsics
+    normalized_mkpts_0 = normalize_mkpts(mkpts_0, K)
+    normalized_mkpts_1 = normalize_mkpts(mkpts_1, K)
+
+    # Compute homography using normalized keypoints
+    H_norm, inlier_mask = cv2.findHomography(normalized_mkpts_0, normalized_mkpts_1, cv2.USAC_MAGSAC, 0.001, confidence=0.99999)
+    
+    # Extract inlier points
+    inliers_0 = normalized_mkpts_0[inlier_mask.ravel() == 1]
+    
+    # Select the first inlier point
+    m = inliers_0[0]
+    
+    # Project m back to pixel coordinates
+    u_v = K @ np.append(m, 1)  # Append 1 for homogeneous coordinates
+    u_v = u_v / u_v[2]  # Normalize by the last coordinate to get (u, v)
+    u, v = int(u_v[0]), int(u_v[1])
+    
+    # Get depth at the corresponding pixel location
+    depth = depth_cur[v, u] / 1000.0  # Assuming depth is in millimeters, convert to meters
+    
+    # Scale the normalized point by its depth
+    m_scaled = m * depth
+    
+    return H_norm, m_scaled 
+    # if H_norm is not None:
+    #     H = K @ H_norm @ np.linalg.inv(K)
+    #     selected_R, selected_t = homography_test(H, mkpts_0, mkpts_1, K)
+    #     # If a valid homography decomposition exists, use it and scale the translation
+    #     if selected_R is not None and selected_t is not None:
+    #         delta_R_camera = selected_R
+    #         # delta_t_camera = selected_t * (np.linalg.norm(delta_t_camera) / np.linalg.norm(selected_t))
 
 def homography_test(H, mkpts_0, mkpts_1, K, inlier_ratio_threshold = 0.5):
     """

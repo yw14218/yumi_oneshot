@@ -42,9 +42,9 @@ def main(dir):
     #     text_prompt=experiment.object,
     #     visualize=False)
     
-    dinoBotVS = DINOBotVS(dir)
-    relCamVS = RelCamVS(dir)
-    homVS = HomVS(dir)
+    # dinoBotVS = DINOBotVS(dir)
+    relCamVS = _HierachicalVS(dir)
+    # homVS = HomVS(dir)
 
     # Initialize Moveit
     yumi.init_Moveit()
@@ -56,11 +56,11 @@ def main(dir):
     try:
         while not rospy.is_shutdown():
             user_input = input("Proceed with waypoint transformation? (yes/no): ").strip().lower()
-            # # Initial head cam alignment
+            # Initial head cam alignment
             # diff_xyz, diff_rpy = pose_estimator.decouple_run(output_path=f"{dir}/", camera_prefix="d415")
             # bottleneck_left[0] += diff_xyz[0]
             # bottleneck_left[1] += diff_xyz[1]
-            # # bottleneck_left[2] += 0.05
+            # bottleneck_left[2] += 0.2
 
             yumi.plan_left_arm(yumi.create_pose(*bottleneck_left[:3], *bottleneck_left[3:]))
             # user_input = input("Proceed with waypoint transformation? (yes/no): ").strip().lower()
@@ -91,11 +91,12 @@ if __name__ == '__main__':
     from poseEstimation import PoseEstimation
     import moveit_utils.yumi_moveit_utils as yumi
     from dinobot import DINOBotVS
-    from relative_cam_vs import RelCamVS
+    from relative_cam_vs import RelCamVS, RelCamVSDust3R
+    from relative_cam_UKF import _PVBSKF, _HierachicalVS
     from homography_vs import HomVS
     from trajectory_utils import apply_transformation_to_waypoints, create_homogeneous_matrix, pose_inv
 
-    rospy.init_node('Base Experiment', anonymous=True)
+    rospy.init_node('Base Experiment', anonymous=True, log_level=rospy.ERROR)
     parser = argparse.ArgumentParser(description='Run Yumi Base Experiment.')
     parser.add_argument('--dir', type=str, help='Directory path for the experiment data.')
     args = parser.parse_args()
