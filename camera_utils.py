@@ -1,14 +1,20 @@
 import numpy as np
 import cv2
+import poselib
 from sklearn.metrics import mean_squared_error
 from sklearn.utils import check_random_state
 
 d405_rgb_topic_name = "d405/color/image_rect_raw"
 d405_depth_topic_name = "d405/aligned_depth_to_color/image_raw"
 d405_K = np.load("handeye/intrinsics_d405.npy")
-d415_K = np.load("handeye/intrinsics_d415.npy")
 d405_T_C_EEF = np.load("handeye/T_C_EEF_wrist_l.npy")
+d405_image_hw = (480, 848)
+
+d415_rgb_topic_name = "d415/color/image_raw"
+d415_depth_topic_name = "d415/aligned_depth_to_color/image_raw"
+d415_K = np.load("handeye/intrinsics_d415.npy")
 d415_T_WC = np.load("handeye/T_WC_head.npy")
+d415_image_hw = (720, 1280)
 
 def normalize_mkpts(mkpts, K):
     """
@@ -226,39 +232,47 @@ def solve_transform_3d(mkpts_0, mkpts_1, depth_ref, depth_cur, K):
     
     return T_est
 
-def compute_homography(mkpts_0, mkpts_1, depth_cur, K):
+def model_selection_homography(mkpts_0, mkpts_1, K, H_inlier_ratio_thr=0.5):
     # Normalize keypoints using camera intrinsics
     normalized_mkpts_0 = normalize_mkpts(mkpts_0, K)
     normalized_mkpts_1 = normalize_mkpts(mkpts_1, K)
 
     # Compute homography using normalized keypoints
-    H_norm, inlier_mask = cv2.findHomography(normalized_mkpts_0, normalized_mkpts_1, cv2.USAC_MAGSAC, 0.001, confidence=0.99999)
+    H_norm, mask = cv2.findHomography(normalized_mkpts_0, normalized_mkpts_1, cv2.USAC_MAGSAC, 0.001, confidence=0.99999)
+    H_inlier_ratio = np.sum(mask) / mask.shape[0]
     
-    # Extract inlier points
-    inliers_0 = normalized_mkpts_0[inlier_mask.ravel() == 1]
-    
-    # Select the first inlier point
-    m = inliers_0[0]
-    
-    # Project m back to pixel coordinates
-    u_v = K @ np.append(m, 1)  # Append 1 for homogeneous coordinates
-    u_v = u_v / u_v[2]  # Normalize by the last coordinate to get (u, v)
-    u, v = int(u_v[0]), int(u_v[1])
-    
-    # Get depth at the corresponding pixel location
-    depth = depth_cur[v, u] / 1000.0  # Assuming depth is in millimeters, convert to meters
-    
-    # Scale the normalized point by its depth
-    m_scaled = m * depth
-    
-    return H_norm, m_scaled 
-    # if H_norm is not None:
-    #     H = K @ H_norm @ np.linalg.inv(K)
-    #     selected_R, selected_t = homography_test(H, mkpts_0, mkpts_1, K)
-    #     # If a valid homography decomposition exists, use it and scale the translation
-    #     if selected_R is not None and selected_t is not None:
-    #         delta_R_camera = selected_R
-    #         # delta_t_camera = selected_t * (np.linalg.norm(delta_t_camera) / np.linalg.norm(selected_t))
+    camera = {'model': 'PINHOLE', 'width': d405_image_hw[1], 'height': d405_image_hw[0], 'params': [K[0, 0], K[1, 1], K[0, 2], K[1, 2]]}
+    M, info = poselib.estimate_relative_pose(mkpts_0, mkpts_1, camera, camera, {"max_epipolar_error": 0.5})
+    E_inlier_ratio = info['num_inliers'] / mask.shape[0]
+
+    return False if E_inlier_ratio > 1.5 * H_inlier_ratio and H_inlier_ratio < H_inlier_ratio_thr else True
+
+
+# # Extract inlier points
+# inliers_0 = normalized_mkpts_0[inlier_mask.ravel() == 1]
+
+# # Select the first inlier point
+# m = inliers_0[0]
+
+# # Project m back to pixel coordinates
+# u_v = K @ np.append(m, 1)  # Append 1 for homogeneous coordinates
+# u_v = u_v / u_v[2]  # Normalize by the last coordinate to get (u, v)
+# u, v = int(u_v[0]), int(u_v[1])
+
+# # Get depth at the corresponding pixel location
+# depth = depth_cur[v, u] / 1000.0  # Assuming depth is in millimeters, convert to meters
+
+# # Scale the normalized point by its depth
+# m_scaled = m * depth
+
+# return H_norm, m_scaled 
+# # if H_norm is not None:
+# #     H = K @ H_norm @ np.linalg.inv(K)
+# #     selected_R, selected_t = homography_test(H, mkpts_0, mkpts_1, K)
+# #     # If a valid homography decomposition exists, use it and scale the translation
+# #     if selected_R is not None and selected_t is not None:
+# #         delta_R_camera = selected_R
+# #         # delta_t_camera = selected_t * (np.linalg.norm(delta_t_camera) / np.linalg.norm(selected_t))
 
 def homography_test(H, mkpts_0, mkpts_1, K, inlier_ratio_threshold = 0.5):
     """
