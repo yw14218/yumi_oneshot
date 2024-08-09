@@ -10,7 +10,7 @@ from trajectory_utils import pose_inv
 from moveit_utils.cartesian_control import YuMiLeftArmCartesianController
 from lightglue import LightGlue, SIFT, SuperPoint
 from lightglue.utils import numpy_image_to_torch, rbd
-from mini_dust3r.api import OptimizedResult, inferece_dust3r, log_optimized_result
+from mini_dust3r.api import inferece_dust3r
 from mini_dust3r.model import AsymmetricCroCo3DStereo
 
 class CartesianVisualServoer(abc.ABC):
@@ -111,7 +111,7 @@ class LightGlueVisualServoer(CartesianVisualServoer):
         mkpts_1 = feats1['keypoints'][matches[..., 1]].cpu().numpy()
 
         if matches.shape[0] == 0:
-            return None, None, None, None
+            return None, None, None
 
         if filter_seg:
             coords = mkpts_0.astype(int)

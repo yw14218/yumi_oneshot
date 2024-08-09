@@ -53,6 +53,24 @@ def add_depth(mkpts, depth, K):
     
     return points_3ds
 
+def weighted_add_depth(mkpts_scores, depth, K):
+    mkpts = mkpts_scores[:, :2]
+    scores = mkpts_scores[:, 2]
+    
+    # Normalize the 2D points using the camera intrinsics
+    normalized_mkpts = normalize_mkpts(mkpts, K)
+    
+    # Fetch the depth values corresponding to the 2D points
+    depth_values = depth[mkpts[:, 1].astype(int), mkpts[:, 0].astype(int)]
+    
+    # Calculate the 3D points from the normalized points and depth values
+    points_3d = normalized_mkpts * depth_values[:, np.newaxis] / 1000  # Scale to meters
+    
+    # Combine the 3D points with their corresponding scores
+    points_3d_weighted = np.hstack([points_3d, scores[:, np.newaxis]])
+    
+    return points_3d_weighted
+
 def compute_transform_least_square(X, Y):
     """
     Find the optimal rigid transformation (rotation and translation) between two sets of 3D points with least squares.
@@ -83,9 +101,6 @@ def compute_transform_least_square(X, Y):
         raise ValueError("Input arrays X and Y must have the same shape and must be 2D arrays with 3 columns.")
 
     # Calculate centroids
-    non_zero_indices = np.all(X != [0, 0, 0], axis=1) & np.all(Y != [0, 0, 0], axis=1)
-    X = X[non_zero_indices]
-    Y = Y[non_zero_indices]
     cX = np.mean(X, axis=0)
     cY = np.mean(Y, axis=0)
     
@@ -112,7 +127,65 @@ def compute_transform_least_square(X, Y):
 
     return R, t
 
-def find_transformation(X, Y, max_iterations=100, threshold=0.005, random_state=None, adaptive=False):
+def weighted_compute_transform_least_square(X_weighted, Y_weighted):
+    """
+    Find the optimal rigid transformation (rotation and translation) between two sets of 3D points with weighted least squares.
+
+    This function calculates the rotation matrix and translation vector that align two sets of 3D points
+    by minimizing the weighted mean squared error between the transformed points in set X and the corresponding points in set Y.
+    
+    The weights are derived from the scores associated with the points.
+
+    Parameters:
+    X_weighted (numpy.ndarray): A 2D array of shape (N, 4) representing the first set of 3D points with associated scores [X, Y, Z, score].
+    Y_weighted (numpy.ndarray): A 2D array of shape (N, 4) representing the second set of 3D points with associated scores [X, Y, Z, score].
+
+    Returns:
+    R (numpy.ndarray): A 2D array of shape (3, 3) representing the rotation matrix.
+    t (numpy.ndarray): A 1D array of shape (3,) representing the translation vector.
+
+    Raises:
+    ValueError: If the input arrays X_weighted and Y_weighted do not have the same shape or do not have four columns.
+    """
+    if X_weighted.shape != Y_weighted.shape or X_weighted.shape[1] != 4:
+        raise ValueError("Input arrays X_weighted and Y_weighted must have the same shape and must be 2D arrays with 4 columns.")
+
+    # Separate the points and scores
+    X = X_weighted[:, :3]
+    Y = Y_weighted[:, :3]
+    weights = X_weighted[:, 3]  # Use the scores as weights
+
+    # Normalize weights
+    weights = weights / np.sum(weights)
+
+    # Calculate weighted centroids
+    cX = np.average(X, axis=0, weights=weights)
+    cY = np.average(Y, axis=0, weights=weights)
+    
+    # Subtract centroids to obtain centered sets of points
+    Xc = X - cX
+    Yc = Y - cY
+    
+    # Calculate weighted covariance matrix
+    C = np.dot((weights[:, np.newaxis] * Xc).T, Yc)
+    
+    # Compute SVD
+    U, S, Vt = np.linalg.svd(C)
+    
+    # Determine rotation matrix
+    R = np.dot(Vt.T, U.T)
+    
+    # Ensure a right-handed coordinate system
+    if np.linalg.det(R) < 0:
+        Vt[2, :] *= -1
+        R = np.dot(Vt.T, U.T)
+    
+    # Determine translation vector
+    t = cY - np.dot(R, cX)
+
+    return R, t
+
+def ransac_find_transformation(X, Y, max_iterations=100, threshold=0.005, random_state=None, fall_back=True):
     """
     Find the optimal rigid transformation (rotation and translation) between two sets of 3D points using RANSAC.
 
@@ -136,8 +209,8 @@ def find_transformation(X, Y, max_iterations=100, threshold=0.005, random_state=
     
     if num_points < 3:
         # Not enough points to define a transformation
-        print("Not enough points to compute a unique transformation.")
-        return None, None, None
+        print("Not enough points to compute a transformation.")
+        return None, None
 
     rng = check_random_state(random_state)
     best_inliers = None
@@ -185,11 +258,10 @@ def find_transformation(X, Y, max_iterations=100, threshold=0.005, random_state=
     if best_R is None or best_t is None:
         print("RANSAC failed to find a valid transformation with the initial threshold.")
 
-        # Fallback mechanism: Adaptive threshold or using all points
-        if adaptive:
-            print("Attempting with an increased threshold.")
-            threshold *= 10  # Increase the threshold and retry
-            return find_transformation(X, Y, max_iterations, threshold, random_state, adaptive=False)
+        if not fall_back:
+            return None, None
+        
+        # Fallback mechanism: using all points
         else:
             print("Fallback: Computing transformation using all points.")
             R, t = compute_transform_least_square(X, Y)
@@ -197,7 +269,7 @@ def find_transformation(X, Y, max_iterations=100, threshold=0.005, random_state=
 
     return best_R, best_t
 
-def solve_transform_3d(mkpts_0, mkpts_1, depth_ref, depth_cur, K):
+def solve_transform_3d(mkpts_0, mkpts_1, depth_ref, depth_cur, K, fall_back=True):
     """
     Compute the 3D transformation matrix between two sets of 3D points derived from depth maps.
 
@@ -222,9 +294,16 @@ def solve_transform_3d(mkpts_0, mkpts_1, depth_ref, depth_cur, K):
     mkpts_0_3d = add_depth(mkpts_0, depth_ref, K)
     mkpts_1_3d = add_depth(mkpts_1, depth_cur, K)
     
-    # Compute the transformation between the two sets of 3D points
-    delta_R_camera, delta_t_camera = find_transformation(mkpts_0_3d, mkpts_1_3d)
+    non_zero_indices = np.all(mkpts_0_3d != [0, 0, 0], axis=1) & np.all(mkpts_1_3d != [0, 0, 0], axis=1)
+    mkpts_0_3d = mkpts_0_3d[non_zero_indices]
+    mkpts_1_3d = mkpts_1_3d[non_zero_indices]
 
+    # Compute the transformation between the two sets of 3D points
+    delta_R_camera, delta_t_camera = ransac_find_transformation(mkpts_0_3d, mkpts_1_3d, fall_back=fall_back)
+
+    if delta_R_camera is None or delta_t_camera is None:
+        return None
+    
     # Create a 4x4 transformation matrix
     T_est = np.eye(4)
     T_est[:3, :3] = delta_R_camera
@@ -232,21 +311,44 @@ def solve_transform_3d(mkpts_0, mkpts_1, depth_ref, depth_cur, K):
     
     return T_est
 
+def weighted_solve_transform_3d(mkpts_scores_0, mkpts_scores_1, depth_ref, depth_cur, K):
+
+    # Convert 2D keypoints and depth maps to 3D points
+    mkpts_0_3d_weighted = weighted_add_depth(mkpts_scores_0, depth_ref, K)
+    mkpts_1_3d_weighted = weighted_add_depth(mkpts_scores_1, depth_cur, K)
+    
+    non_zero_indices = (mkpts_0_3d_weighted[:, 2] != 0) & (mkpts_1_3d_weighted[:, 2] != 0)
+    mkpts_0_3d_weighted = mkpts_0_3d_weighted[non_zero_indices]
+    mkpts_1_3d_weighted = mkpts_1_3d_weighted[non_zero_indices]
+
+    # Compute the transformation between the two sets of 3D points
+    delta_R_camera, delta_t_camera = weighted_compute_transform_least_square(mkpts_0_3d_weighted, mkpts_1_3d_weighted)
+
+    # Create a 4x4 transformation matrix
+    T_est = np.eye(4)
+    T_est[:3, :3] = delta_R_camera
+    T_est[:3, 3] = delta_t_camera
+    
+    return mkpts_0_3d_weighted, mkpts_1_3d_weighted, T_est
+
 def model_selection_homography(mkpts_0, mkpts_1, K, H_inlier_ratio_thr=0.5):
     # Normalize keypoints using camera intrinsics
     normalized_mkpts_0 = normalize_mkpts(mkpts_0, K)
     normalized_mkpts_1 = normalize_mkpts(mkpts_1, K)
 
     # Compute homography using normalized keypoints
-    H_norm, mask = cv2.findHomography(normalized_mkpts_0, normalized_mkpts_1, cv2.USAC_MAGSAC, 0.001, confidence=0.99999)
+    H_norm, mask = cv2.findHomography(normalized_mkpts_0, normalized_mkpts_1, cv2.USAC_MAGSAC, 0.005, confidence=0.99999)
     H_inlier_ratio = np.sum(mask) / mask.shape[0]
     
     camera = {'model': 'PINHOLE', 'width': d405_image_hw[1], 'height': d405_image_hw[0], 'params': [K[0, 0], K[1, 1], K[0, 2], K[1, 2]]}
     M, info = poselib.estimate_relative_pose(mkpts_0, mkpts_1, camera, camera, {"max_epipolar_error": 0.5})
     E_inlier_ratio = info['num_inliers'] / mask.shape[0]
 
-    return False if E_inlier_ratio > 1.5 * H_inlier_ratio and H_inlier_ratio < H_inlier_ratio_thr else True
-
+    # Print the decision criteria and the final decision
+    decision = not (E_inlier_ratio > 1.5 * H_inlier_ratio and H_inlier_ratio < H_inlier_ratio_thr)
+    print(f"E_inlier_ratio: {E_inlier_ratio:.3f}, H_inlier_ratio: {H_inlier_ratio:.3f}, is dominated by planes: {decision}")
+    
+    return decision
 
 # # Extract inlier points
 # inliers_0 = normalized_mkpts_0[inlier_mask.ravel() == 1]
@@ -273,97 +375,3 @@ def model_selection_homography(mkpts_0, mkpts_1, K, H_inlier_ratio_thr=0.5):
 # #     if selected_R is not None and selected_t is not None:
 # #         delta_R_camera = selected_R
 # #         # delta_t_camera = selected_t * (np.linalg.norm(delta_t_camera) / np.linalg.norm(selected_t))
-
-def homography_test(H, mkpts_0, mkpts_1, K, inlier_ratio_threshold = 0.5):
-    """
-    Perform a homography test based on reprojection error and decompose
-    the homography matrix into possible rotations and translations.
-
-    Args:
-        H (np.ndarray): 3x3 homography matrix.
-        mkpts_0 (np.ndarray): Matched keypoints from image 0 (Nx2).
-        mkpts_1 (np.ndarray): Matched keypoints from image 1 (Nx2).
-        K (np.ndarray): Camera intrinsic matrix.
-
-    Returns:
-        T_delta_cam (np.ndarray or None): 4x4 transformation matrix if the homography is valid,
-                                          otherwise None.
-    """
-    
-    # Validate the homography using inlier ratio
-    inlier_ratio = homography_test_inlier_ratio(H, mkpts_0, mkpts_1)
-    
-    # Set a threshold for the inlier ratio
-    inlier_ratio_threshold = 0.3
-
-    if inlier_ratio >= inlier_ratio_threshold:
-        print(f"Valid Homography with inlier_ratio: {inlier_ratio:.6f}")
-
-         # Decompose the homography matrix into possible rotation matrices, translation vectors, and normals
-        num_solutions, rotations, translations, normals = cv2.decomposeHomographyMat(H, K)
-
-        best_solution_index = None
-        best_solution_score = float('inf')
-
-        # Iterate over the decompositions and select the best one based on specific criteria
-        for i in range(num_solutions):
-            R = rotations[i]
-            t = translations[i]
-            
-            # Check if the Z-component of the translation vector is positive (positive depth)
-            if t[2] <= 0:
-                continue
-
-            # Calculate yaw (rotation around the Z-axis)
-            yaw = np.arctan2(R[1, 0], R[0, 0])
-
-            # Calculate the score (penalize less yaw or negative depth)
-            score = abs(yaw)
-
-            # Select the best solution based on score
-            if score < best_solution_score:
-                best_solution_score = score
-                best_solution_index = i
-
-        if best_solution_index is not None:
-            selected_R = rotations[best_solution_index]
-            selected_t = translations[best_solution_index]
-
-            return selected_R, selected_t.flatten()
-        else:
-            print("No valid solution found after homography decomposition.")
-
-    else:
-        print(f"Homography hypothesis rejected due to low inlier ratio: {inlier_ratio:.3f}")
-
-    # Fallback if homography is not valid or no valid decomposition was found
-    return None, None
-
-def homography_test_inlier_ratio(H, mkpts_0, mkpts_1, threshold=5.0):
-    """
-    Validate homography using inlier ratio instead of reprojection error.
-
-    Args:
-        H (np.ndarray): 3x3 homography matrix.
-        mkpts_0 (np.ndarray): Matched keypoints from image 0 (Nx2).
-        mkpts_1 (np.ndarray): Matched keypoints from image 1 (Nx2).
-        threshold (float): Distance threshold to consider a point as an inlier.
-
-    Returns:
-        (float): Inlier ratio, fraction of points that are consistent with the homography.
-    """
-    # Reproject points from mkpts_0 to mkpts_1 using homography H
-    reprojected_points = cv2.perspectiveTransform(mkpts_0.reshape(-1, 1, 2), H).reshape(-1, 2)
-    
-    # Compute Euclidean distances between the original and reprojected points
-    distances = np.linalg.norm(reprojected_points - mkpts_1, axis=1)
-    
-    # Determine inliers based on the threshold
-    inliers = distances < threshold
-    inlier_count = np.sum(inliers)
-    total_count = len(mkpts_0)
-    
-    # Compute inlier ratio
-    inlier_ratio = inlier_count / total_count
-    
-    return inlier_ratio

@@ -330,8 +330,8 @@ class ProbPPR:
         vectors = []
         for transformation in transformations:
             translation, rotation = self.extract_translation_rotation(transformation)
-            rotation_quat = R.from_matrix(rotation).as_quat()
-            vector = np.concatenate((translation, rotation_quat))
+            rotation_euler = R.from_matrix(rotation).as_euler('xyz')
+            vector = np.concatenate((translation, rotation_euler))
             vectors.append(vector)
         return np.array(vectors)
 
@@ -342,9 +342,9 @@ class ProbPPR:
         mean_translation = np.mean(vectors[:, :3], axis=0)
         
         # Compute mean rotation using quaternion averaging
-        mean_rotation_quat = np.mean(vectors[:, 3:], axis=0)
-        mean_rotation_quat /= np.linalg.norm(mean_rotation_quat)
-        mean_rotation = R.from_quat(mean_rotation_quat).as_matrix()
+        mean_rotation_euler = np.mean(vectors[:, 3:], axis=0)
+        mean_rotation_euler /= np.linalg.norm(mean_rotation_euler)
+        mean_rotation = R.from_euler('xyz', mean_rotation_euler).as_matrix()
         
         mean_transformation = np.eye(4)
         mean_transformation[:3, :3] = mean_rotation
