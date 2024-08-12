@@ -16,12 +16,12 @@ class HierachicalVisualServoing():
 
     def run(self, prior_state=None, prior_covariance=None):
         globalMultiCamKFVisualServoing = GlobalMultiCamKFVisualServoing(self.dir, prior_state=prior_state, prior_covariance=prior_covariance)
-        T_delta_cam_init = globalMultiCamKFVisualServoing.run()
-        print(T_delta_cam_init)
+        T_delta_cam_before_switch = globalMultiCamKFVisualServoing.run()
+        print(T_delta_cam_before_switch)
         del globalMultiCamKFVisualServoing
 
         refinedLocalVisualServoer = RefinedLocalVisualServoer(self.dir)
-        refinedLocalVisualServoer.run(init_T_delta_cam=np.eye(4))
+        refinedLocalVisualServoer.run(T_delta_cam_before_switch)
 
 
 class YuMiExperiment(ABC):
@@ -76,16 +76,16 @@ def main(dir):
             T_delta_cam, cov_matrix = pose_estimator.run(output_path=f"{dir}/", camera_prefix="d415", probICP=True)
             T_delta_world = T_WC @ T_delta_cam @ pose_inv(T_WC)
             prior_state = T_delta_world @ T_bottleneck_left
+
+            # Initial head cam alignment
+            diff_xyz, diff_rpy = pose_estimator.decouple_run(output_path=f"{dir}/", camera_prefix="d415")
+            bottleneck_left[0] += diff_xyz[0]
+            bottleneck_left[1] += diff_xyz[1]
+            bottleneck_left[2] += 0.2
             del pose_estimator
             torch.cuda.empty_cache()
             gc.collect()
-            # Initial head cam alignment
-            # diff_xyz, diff_rpy = pose_estimator.decouple_run(output_path=f"{dir}/", camera_prefix="d415")
-            # bottleneck_left[0] += diff_xyz[0]
-            # bottleneck_left[1] += diff_xyz[1]
-            
-            # bottleneck_left[2] += 0.15
-            # yumi.plan_left_arm(yumi.create_pose(*bottleneck_left[:3], *bottleneck_left[3:]))
+            yumi.plan_left_arm(yumi.create_pose(*bottleneck_left[:3], *bottleneck_left[3:]))
             # prior_state = None
             # cov_matrix = None
 
@@ -100,7 +100,7 @@ def main(dir):
             #     experiment.rearrange(live_rearrange, demo_rearrange[0].tolist(), yumi.LEFT)
             #     yumi.plan_left_arm(yumi.create_pose(*bottleneck_left[:3], *bottleneck_left[3:]))
 
-            # # Replay experiment
+            # Replay experiment
             T_delta_world =  yumi.get_curent_T_left() @ pose_inv(T_bottleneck_left)
             live_waypoints = apply_transformation_to_waypoints(experiment.demo_waypoints, T_delta_world, project3D=False)
             experiment.replay(live_waypoints)

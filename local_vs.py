@@ -22,16 +22,23 @@ class RefinedLocalVisualServoer(LightGlueVisualServoer):
         self.depth_ref = np.array(Image.open(f"{DIR}/demo_wrist_depth.png"))
         self.gain = 0.05
         self.use_homography = None
+        self.m_star = None
+        self.Z_star = None
+        self.previous_estimate_of_R = None
 
-    def decompose_homography(self, H_norm, R_before_switch, solution_index=None):
+        self.pid_x = PIDController(Kp=0.05, Ki=0.0, Kd=0.01)
+        self.pid_y = PIDController(Kp=0.05, Ki=0.0, Kd=0.01)
+        self.pid_z = PIDController(Kp=0.025, Ki=0.0, Kd=0.005)
+        self.pid_rx = PIDController(Kp=0.025, Ki=0.0, Kd=0.005)
+        self.pid_ry = PIDController(Kp=0.025, Ki=0.0, Kd=0.005)
+        self.pid_rz = PIDController(Kp=0.025, Ki=0.0, Kd=0.005)
+
+    def decompose_homography(self, H_norm):
         # Decompose the homography matrix into possible rotation matrices, translation vectors, and normals
         num_solutions, rotations, translations, normals = cv2.decomposeHomographyMat(H_norm, np.eye(3))
 
         best_solution_index = None
         best_solution_error = float('inf')
-
-        if solution_index is not None:
-            return solution_index, rotations[solution_index], translations[solution_index]
         
         # Iterate over the decompositions and select the best one based on specific criteria
         for i in range(num_solutions):
@@ -42,7 +49,7 @@ class RefinedLocalVisualServoer(LightGlueVisualServoer):
             if t[2] <= 0:
                 continue
             
-            error = np.arccos((np.trace(np.dot(R_before_switch.T, R)) - 1) / 2)
+            error = np.arccos((np.trace(np.dot(self.previous_estimate_of_R.T, R)) - 1) / 2)
 
             # Select the best solution based on score
             if error < best_solution_error:
@@ -52,60 +59,113 @@ class RefinedLocalVisualServoer(LightGlueVisualServoer):
         if best_solution_index is not None:
             selected_R = rotations[best_solution_index]
             selected_t = translations[best_solution_index]
-
-            return solution_index, selected_R, selected_t.flatten()
+            self.previous_estimate_of_R = selected_R
+            return selected_R, selected_t.flatten()
         else:
-            return None, None, None
+            return None, None
 
-    def get_homography_point(self, mkpts_0, mkpts_1, depth_ref, K):
+    def update_reference_point(self, mkpts_0, mkpts_1, K, thresh=0.5):
+        ransac_thr = thresh / np.mean([K[0, 0], K[1, 1], K[0, 0], K[1, 1]])
         normalized_mkpts_0 = normalize_mkpts(mkpts_0, K)
         normalized_mkpts_1 = normalize_mkpts(mkpts_1, K)
+        
+        try:
+            # Step 1: Get homography
+            H_norm, inlier_mask = cv2.findHomography(normalized_mkpts_0, normalized_mkpts_1, cv2.USAC_MAGSAC, ransac_thr, confidence=0.99999)
+            # Step 2: Filter the Inlier Points
+            inlier_mkpts_0 = normalized_mkpts_0[inlier_mask.ravel() == 1]
+            inlier_mkpts_1 = normalized_mkpts_1[inlier_mask.ravel() == 1]
 
-        # Compute homography using normalized keypoints to improve robustness
-        H_norm, inlier_mask = cv2.findHomography(normalized_mkpts_0, normalized_mkpts_1, cv2.USAC_MAGSAC, 0.001, confidence=0.99999)
-        inliers_0 = normalized_mkpts_0[inlier_mask.ravel() == 1]
+            # Convert to original coordinates to match with the depth map
+            inlier_mkpts_0_orig = mkpts_0[inlier_mask.ravel() == 1]
 
-    def get_task_function_homography(self, mkpts_0, mkpts_1, depth_ref, K, thresh=0.5):
-        ransac_thr = thresh / np.mean([K[0, 0], K[1, 1], K[0, 0], K[1, 1]])
+            # Step 3: Filter inliers with non-zero depth and get their depth values
+            inlier_coords = inlier_mkpts_0_orig[:, :2].astype(int)
+            depth_values = self.depth_ref[inlier_coords[:, 1], inlier_coords[:, 0]]
+            non_zero_mask = depth_values > 0
+
+            if not np.any(non_zero_mask):
+                raise ValueError("No inliers with non-zero depth found.")
+
+            # Filter inliers and depth values based on non-zero depth
+            inlier_mkpts_0_non_zero = inlier_mkpts_0[non_zero_mask]
+            inlier_mkpts_1_non_zero = inlier_mkpts_1[non_zero_mask]
+
+            if len(inlier_mkpts_0_non_zero) == 0:
+                raise ValueError("No inliers with non-zero depth found.")
+            
+            depth_values_non_zero = depth_values[non_zero_mask]
+
+            # Step 4: Calculate Reprojection Errors
+            reprojected_points_homogeneous = (H_norm @ np.hstack([inlier_mkpts_0_non_zero]).T).T
+            reprojected_points = reprojected_points_homogeneous[:, :2] / reprojected_points_homogeneous[:, 2].reshape(-1, 1)
+            reprojection_errors = np.linalg.norm(reprojected_points - inlier_mkpts_1_non_zero[:, :2], axis=1)
+
+            # Step 5: Identify the Most Confident Inlier and its Depth Value
+            most_confident_inlier_idx = np.argmin(reprojection_errors)
+            most_confident_inlier = inlier_mkpts_0_non_zero[most_confident_inlier_idx]
+            most_confident_inlier_depth = depth_values_non_zero[most_confident_inlier_idx]
+
+            self.m_star = most_confident_inlier
+            self.Z_star = most_confident_inlier_depth/1000
+            print("Most Confident Inlier Point with Non-Zero Depth:", self.m_star)
+            print("Corresponding Depth Value:", self.Z_star)
+
+        except Exception as e:
+            print(f"An error occurred: {e}")
+
+
+    def get_task_function_homography(self, mkpts_0, mkpts_1, depth_cur, K):
         # Normalize keypoints using camera intrinsics
         normalized_mkpts_0 = normalize_mkpts(mkpts_0, K)
         normalized_mkpts_1 = normalize_mkpts(mkpts_1, K)
 
         # Compute homography using normalized keypoints to improve robustness
-        H_norm, inlier_mask = cv2.findHomography(normalized_mkpts_0, normalized_mkpts_1, cv2.USAC_MAGSAC, ransac_thr, confidence=0.99999)
-        H = K @ H_norm @ np.linalg.inv(K)
+        H_norm, inlier_mask = cv2.findHomography(normalized_mkpts_0, normalized_mkpts_1, cv2.USAC_MAGSAC, 0.001, confidence=0.99999)
 
-        solution_index, selected_R, selected_t = self.decompose_homography(H_norm)
-        delta_R = R.from_matrix(selected_R).as_euler('xyz')
 
-        # Extract inlier points
-        inliers_0 = normalized_mkpts_0[inlier_mask.ravel() == 1]
+        selected_R, selected_t = self.decompose_homography(H_norm)
+        self.R_delta_cam_before_switch = selected_R
         
-        if len(inliers_0) == 0:
-            return None, None, None, None
-
-        # Select the inlier point with the highest score (since sorted in descending order already)
-        m_homogeneous = inliers_0[0]
-        u_v = K @ m_homogeneous
-        u_v /= u_v[2]  # Normalize by the last coordinate to get (u, v)
-        u, v = int(u_v[0]), int(u_v[1])
+        r_theta = R.from_matrix(selected_R).as_euler('xyz')
         
-        H = K @ H_norm @ np.linalg.inv(K)
+        reprojected_points_homogeneous = H_norm @ self.m_star 
+        m = reprojected_points_homogeneous / reprojected_points_homogeneous[2]
 
-        cur_pixel = H @ u_v
+        pixel_coords = K @ m  # Matrix multiplication
+        u, v = pixel_coords[:2]  # Extract u and v
 
-        # Get depth at the corresponding pixel location
-        depth = depth_ref[v, u] / 1000.0 
+        pixel_coords_ref = K @ self.m_star
+        u_star, v_star = pixel_coords_ref[:2] 
+        Z = depth_cur[int(v), int(u)] / 1000
 
-        # Compute the transformed point in normalized coordinates
-        transformed_m =  m_homogeneous - H_norm @ m_homogeneous
-        transformed_m /= transformed_m[2]
-        transformed_m *= depth
+        if Z == 0:
+            # Define the 3x3 window around (u, v)
+            u_min, u_max = max(0, int(u) - 1), min(depth_cur.shape[1] - 1, int(u) + 1)
+            v_min, v_max = max(0, int(v) - 1), min(depth_cur.shape[0] - 1, int(v) + 1)
+            
+            # Extract the 3x3 window
+            window = depth_cur[v_min:v_max + 1, u_min:u_max + 1]
 
-        # Compute the difference in 3D coordinates
-        delta_t = m_homogeneous[:3] - transformed_m[:3]
+            # Calculate the average depth of non-zero values in the window
+            non_zero_values = window[window > 0]
+            if non_zero_values.size > 0:
+                Z = np.mean(non_zero_values) / 1000
+            else:
+                return None, None, None
 
-        return delta_t, delta_R, u_v, cur_pixel
+        error = np.linalg.norm(np.array([u_star, v_star]) - np.array([u, v]), ord=1)
+        # print(f"Pixel coordinates: u = {u}, v = {v}, Depth Z = {Z}, Error = {error}")
+
+        pho = Z / self.Z_star
+        delta_x = (self.m_star[0] - pho * m[0]) * self.Z_star
+        delta_y = (self.m_star[1] - pho * m[1]) * self.Z_star
+        
+        delta_z = 1 - pho
+        delta_t = [delta_x, delta_y, delta_z]
+        delta_r = r_theta
+
+        return delta_t, delta_r, error
 
     def get_task_function_3d(self, mkpts_scores_0, mkpts_scores_1, depth_cur, K):
         mkpts_0_3d_weighted, mkpts_1_3d_weighted, T_delta_cam = weighted_solve_transform_3d(mkpts_scores_0, mkpts_scores_1, self.depth_ref, depth_cur, K)
@@ -124,9 +184,9 @@ class RefinedLocalVisualServoer(LightGlueVisualServoer):
         delta_r = R.from_matrix(R_delta_cam).as_euler('xyz')
         error = np.linalg.norm(cX - cY, ord=1)
 
-        return delta_t, delta_r, error
+        return -delta_t, delta_r, error
 
-    def run(self, init_T_delta_cam, max_iterations=150, threshold=0.1):
+    def run(self, T_delta_cam_before_switch, max_iterations=150):
         # Get the current pose and convert quaternion to Euler angles
         current_pose = yumi.get_current_pose(yumi.LEFT).pose
         current_rpy = np.array(euler_from_quat([
@@ -136,20 +196,9 @@ class RefinedLocalVisualServoer(LightGlueVisualServoer):
             current_pose.orientation.w
         ]))
 
-        pid_x = PIDController(Kp=0.05, Ki=0.0, Kd=0.01)
-        pid_y = PIDController(Kp=0.05, Ki=0.0, Kd=0.01)
-        pid_z = PIDController(Kp=0.05, Ki=0.0, Kd=0.01)
-        pid_rx = PIDController(Kp=0.1, Ki=0.0, Kd=0.02)
-        pid_ry = PIDController(Kp=0.1, Ki=0.0, Kd=0.02)
-        pid_rz = PIDController(Kp=0.1, Ki=0.0, Kd=0.02)
-
         # Initialize error
         trajectories = []
-        errors = []
-        translation_error = 1e6
-        rotation_error = 1e6
-        num_iteration = 0
-
+        self.errors = []
         trajectories.append([current_pose.position.x, current_pose.position.y, current_pose.position.z, np.degrees(current_rpy[-1])])
         rospy.sleep(0.1)
 
@@ -172,40 +221,32 @@ class RefinedLocalVisualServoer(LightGlueVisualServoer):
                 delta_t, delta_r, error = self.get_task_function_3d(mkpts_scores_0, mkpts_scores_1, depth_cur, K)
                 print(f"Step {iteration + 1}, Error is : {error:.4g}")
             else:
-                delta_t, delta_r, error = self.get_task_function_homography(mkpts_scores_0, mkpts_scores_1, depth_cur, K)
+                if self.m_star is None:
+                    self.update_reference_point(mkpts_scores_0[:, :2], mkpts_scores_1[:, :2], K)
+                    self.previous_estimate_of_R = T_delta_cam_before_switch[:3, :3]
+                delta_t, delta_r, error = self.get_task_function_homography(mkpts_scores_0[:, :2], mkpts_scores_1[:, :2], depth_cur, K)
+                if delta_r is None:
+                    continue
+                print(f"Step {iteration + 1}, Pixel Error is : {error:.4g}")
 
-            # Compute transformation
-            # T_delta_cam, _ = solve_transform_3d(mkpts_scores_0[:, :2] , mkpts_scores_1[:, :2] , self.depth_ref, depth_cur, K, compute_homography=False)
-            
-            # Capture current image and detect projection pixel
-            # delta_t, delta_R, ref_pixel, cur_pixel  = self.get_homography_task_function(mkpts_scores_0[:, :2], mkpts_scores_1[:, :2], depth_cur, K)
-            # if delta_t is None:
-            #     continue
+            rotation_error = np.rad2deg(np.linalg.norm(delta_r, ord=1))
+            print(f"Step {iteration + 1}, Depth Error is: {delta_t[2]:.4g}, Rotation Error is : {rotation_error:.4g}")
 
-            # delta_x = ref_pixel[0] - cur_pixel[0]
-            # delta_y = ref_pixel[1] - cur_pixel[1]
-            # error = np.linalg.norm(np.array([ref_pixel]) - np.array(cur_pixel), ord=1)
-
-            # # Check if error is within threshold
-            # if (abs(delta_x) < threshold and abs(delta_y) < threshold and error < 1) or iteration == max_iterations - 1:
-            #     print(abs(delta_x), abs(delta_y))
-            #     break
-
-            # errors.append(error)
-
-            control_input_x = np.clip(pid_x.update(delta_t[0]), -0.005, 0.005)
-            control_input_y = np.clip(pid_y.update(delta_t[1]), -0.005, 0.005)
-            control_input_z = np.clip(pid_z.update(delta_t[2]), -0.005, 0.005)
-            control_input_rx = np.clip(pid_rx.update(delta_r[-1]), -0.05, 0.05)
-            control_input_ry = np.clip(pid_ry.update(delta_r[-1]), -0.05, 0.05)
-            control_input_rz = np.clip(pid_rz.update(delta_r[-1]), -0.05, 0.05)
+            if error < 0.3 and rotation_error < 0.5 and delta_t[2] < 0.002:
+                break
+            control_input_x = np.clip(self.pid_x.update(delta_t[0]), -0.002, 0.002)
+            control_input_y = np.clip(self.pid_y.update(delta_t[1]), -0.002, 0.002)
+            control_input_z = np.clip(self.pid_z.update(delta_t[2]), -0.002, 0.002)
+            control_input_rx = np.clip(self.pid_rx.update(delta_r[0]), -0.05, 0.05)
+            control_input_ry = np.clip(self.pid_ry.update(delta_r[1]), -0.05, 0.05)
+            control_input_rz = np.clip(self.pid_rz.update(delta_r[2]), -0.05, 0.05)
 
             # Move robot by the updated control input
             current_pose.position.x += control_input_x
             current_pose.position.y -= control_input_y
             current_pose.position.z += control_input_z
-            current_rpy[0] -= control_input_rx
-            current_rpy[1] -= control_input_ry
+            # current_rpy[0] -= control_input_rx
+            # current_rpy[1] -= control_input_ry
             current_rpy[2] -= control_input_rz
             
             # trajectories.append([current_pose.position.x, current_pose.position.y, np.degrees(current_rpy[-1])])

@@ -40,7 +40,7 @@ class YuMiLeftArmCartesianController:
         msg = JointTrajectory()
         point = JointTrajectoryPoint()
         point.positions = target_joints
-        point.time_from_start = rospy.Duration(0.01)
+        point.time_from_start = rospy.Duration(0.05)
         msg.header.stamp = rospy.Time.now()
         msg.joint_names = self.joint_names
         msg.points.append(point)

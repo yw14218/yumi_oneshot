@@ -18,10 +18,11 @@ class GlobalMultiCamKFVisualServoing(LightGlueVisualServoer):
         )
         self.DIR = DIR
         self.depth_ref = np.array(Image.open(f"{DIR}/demo_wrist_depth.png"))
-        self.max_translation_step = 0.005
-        self.max_rotation_step = np.deg2rad(5)
+        self.max_translation_step = 0.003
+        self.max_rotation_step = np.deg2rad(3)
         self.moving_window = deque(maxlen=3) # sliding window of states to estimate variance
-        self.gains = [0.15, 0.15, 0.02, 0.1, 0.1, 0.2] # (proportional gain)
+        # self.gains = [0.15, 0.15, 0.02, 0.1, 0.1, 0.2] # (proportional gain)
+        self.gains = [0.15, 0.15, 0.15, 0.1, 0.1, 0.15] # (proportional gain)
         self.switch_threshold = (0.02, 10)  # (meters, degrees)
 
         self.prior_state = transform_to_state(prior_state) if prior_state is not None else None
@@ -45,7 +46,7 @@ class GlobalMultiCamKFVisualServoing(LightGlueVisualServoer):
             ukf.P = np.eye(state_dim) * 100000  # high initial uncertainty
         else:
             ukf.x = self.prior_state
-            ukf.P = np.eye(state_dim) * 0.1
+            ukf.P = np.eye(state_dim) * 0.5
 
         ukf.R = np.eye(state_dim) * 10  # measurement noise
         ukf.Q = np.eye(state_dim) # zero process noise
@@ -69,8 +70,8 @@ class GlobalMultiCamKFVisualServoing(LightGlueVisualServoer):
     @staticmethod
     def state_to_T_delta_cam(state):
         T_current_eef_world = yumi.get_curent_T_left()
-        T_delta_cam = pose_inv(T_wristcam_eef) @ pose_inv(state_to_transform(state)) @ T_current_eef_world @ T_wristcam_eef
-        return T_delta_cam
+        filtered_T_delta_cam = pose_inv(T_wristcam_eef) @ pose_inv(T_current_eef_world) @ state_to_transform(state) @ T_wristcam_eef
+        return filtered_T_delta_cam
     
     def compute_control_input(self, goal_state, current_state):
         """Compute control input based on the current state estimate."""
@@ -141,7 +142,7 @@ class GlobalMultiCamKFVisualServoing(LightGlueVisualServoer):
             
 
     def run(self):
-        self.run_global()
+        # self.run_global()
 
         # Get the current pose and convert quaternion to Euler angles
         current_pose = yumi.get_current_pose(yumi.LEFT).pose
@@ -183,7 +184,7 @@ class GlobalMultiCamKFVisualServoing(LightGlueVisualServoer):
 
             # Compute the current state estimate
             goal_state, current_state = self.compute_goal_state(T_delta_cam)
-            
+
             cov_matrix = self.add_measurements(goal_state)
             if cov_matrix is None:
                 continue
@@ -200,8 +201,8 @@ class GlobalMultiCamKFVisualServoing(LightGlueVisualServoer):
             current_pose.position.x += control_input[0]
             current_pose.position.y += control_input[1]
             current_pose.position.z += control_input[2]
-            current_rpy[0] += control_input[3]
-            current_rpy[1] += control_input[4]
+            # current_rpy[0] += control_input[3]
+            # current_rpy[1] += control_input[4]
             current_rpy[2] += control_input[5]
 
             eef_pose_next = yumi.create_pose_euler(current_pose.position.x, 
