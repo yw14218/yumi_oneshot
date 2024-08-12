@@ -349,29 +349,3 @@ def model_selection_homography(mkpts_0, mkpts_1, K, H_inlier_ratio_thr=0.5):
     print(f"E_inlier_ratio: {E_inlier_ratio:.3f}, H_inlier_ratio: {H_inlier_ratio:.3f}, is dominated by planes: {decision}")
     
     return decision
-
-# # Extract inlier points
-# inliers_0 = normalized_mkpts_0[inlier_mask.ravel() == 1]
-
-# # Select the first inlier point
-# m = inliers_0[0]
-
-# # Project m back to pixel coordinates
-# u_v = K @ np.append(m, 1)  # Append 1 for homogeneous coordinates
-# u_v = u_v / u_v[2]  # Normalize by the last coordinate to get (u, v)
-# u, v = int(u_v[0]), int(u_v[1])
-
-# # Get depth at the corresponding pixel location
-# depth = depth_cur[v, u] / 1000.0  # Assuming depth is in millimeters, convert to meters
-
-# # Scale the normalized point by its depth
-# m_scaled = m * depth
-
-# return H_norm, m_scaled 
-# # if H_norm is not None:
-# #     H = K @ H_norm @ np.linalg.inv(K)
-# #     selected_R, selected_t = homography_test(H, mkpts_0, mkpts_1, K)
-# #     # If a valid homography decomposition exists, use it and scale the translation
-# #     if selected_R is not None and selected_t is not None:
-# #         delta_R_camera = selected_R
-# #         # delta_t_camera = selected_t * (np.linalg.norm(delta_t_camera) / np.linalg.norm(selected_t))

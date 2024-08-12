@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-from abc import ABC, abstractmethod
-import argparse
-from experiments import load_experiment
-from trajectory_utils import euler_from_matrix
 import numpy as np
+import argparse
+import gc
+import torch
+from abc import ABC, abstractmethod
+from experiments import load_experiment
 from global_alignment import GlobalMultiCamKFVisualServoing
 from local_vs import RefinedLocalVisualServoer
 from camera_utils import d415_T_WC as T_WC
-import gc
-import torch
+
 
 class HierachicalVisualServoing():
     def __init__(self, dir):
@@ -88,7 +88,7 @@ def main(dir):
             # yumi.plan_left_arm(yumi.create_pose(*bottleneck_left[:3], *bottleneck_left[3:]))
             # prior_state = None
             # cov_matrix = None
-            # homVS.run()
+
             rospy.sleep(0.5)
             hierachicalVisualServoing.run(prior_state=prior_state, prior_covariance=cov_matrix)
             # T_delta_world =  yumi.get_curent_T_left() @ pose_inv(T_bottleneck_left)
@@ -101,9 +101,8 @@ def main(dir):
             #     yumi.plan_left_arm(yumi.create_pose(*bottleneck_left[:3], *bottleneck_left[3:]))
 
             # # Replay experiment
-            # homVS.run()
             T_delta_world =  yumi.get_curent_T_left() @ pose_inv(T_bottleneck_left)
-            live_waypoints = apply_transformation_to_waypoints(experiment.demo_waypoints, T_delta_world, project3D=True)
+            live_waypoints = apply_transformation_to_waypoints(experiment.demo_waypoints, T_delta_world, project3D=False)
             experiment.replay(live_waypoints)
             
             break
@@ -113,11 +112,9 @@ def main(dir):
 
 if __name__ == '__main__':
     import rospy
-    from poseEstimation import PoseEstimation
     import moveit_utils.yumi_moveit_utils as yumi
+    from poseEstimation import PoseEstimation
     from dinobot import DINOBotVS
-    from relative_cam_vs import RelCamVS, RelCamVSDust3R
-    from homography_vs import HomVS
     from trajectory_utils import apply_transformation_to_waypoints, create_homogeneous_matrix, pose_inv
 
     rospy.init_node('Base Experiment', anonymous=True, log_level=rospy.ERROR)

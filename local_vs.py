@@ -23,13 +23,16 @@ class RefinedLocalVisualServoer(LightGlueVisualServoer):
         self.gain = 0.05
         self.use_homography = None
 
-    def decompose_homography(self, H_norm):
+    def decompose_homography(self, H_norm, R_before_switch, solution_index=None):
         # Decompose the homography matrix into possible rotation matrices, translation vectors, and normals
         num_solutions, rotations, translations, normals = cv2.decomposeHomographyMat(H_norm, np.eye(3))
 
         best_solution_index = None
-        best_solution_score = float('inf')
+        best_solution_error = float('inf')
 
+        if solution_index is not None:
+            return solution_index, rotations[solution_index], translations[solution_index]
+        
         # Iterate over the decompositions and select the best one based on specific criteria
         for i in range(num_solutions):
             R = rotations[i]
@@ -38,25 +41,21 @@ class RefinedLocalVisualServoer(LightGlueVisualServoer):
             # Check if the Z-component of the translation vector is positive (positive depth)
             if t[2] <= 0:
                 continue
-
-            # Calculate yaw (rotation around the Z-axis)
-            yaw = np.arctan2(R[1, 0], R[0, 0])
-
-            # Calculate the score (penalize less yaw or negative depth)
-            score = abs(yaw)
+            
+            error = np.arccos((np.trace(np.dot(R_before_switch.T, R)) - 1) / 2)
 
             # Select the best solution based on score
-            if score < best_solution_score:
-                best_solution_score = score
+            if error < best_solution_error:
+                best_solution_error = error
                 best_solution_index = i
 
         if best_solution_index is not None:
             selected_R = rotations[best_solution_index]
             selected_t = translations[best_solution_index]
 
-            return selected_R, selected_t.flatten()
+            return solution_index, selected_R, selected_t.flatten()
         else:
-            return None, None
+            return None, None, None
 
     def get_homography_point(self, mkpts_0, mkpts_1, depth_ref, K):
         normalized_mkpts_0 = normalize_mkpts(mkpts_0, K)
@@ -66,7 +65,7 @@ class RefinedLocalVisualServoer(LightGlueVisualServoer):
         H_norm, inlier_mask = cv2.findHomography(normalized_mkpts_0, normalized_mkpts_1, cv2.USAC_MAGSAC, 0.001, confidence=0.99999)
         inliers_0 = normalized_mkpts_0[inlier_mask.ravel() == 1]
 
-    def get_homography_task_function(self, mkpts_0, mkpts_1, depth_ref, K, thresh=0.5):
+    def get_task_function_homography(self, mkpts_0, mkpts_1, depth_ref, K, thresh=0.5):
         ransac_thr = thresh / np.mean([K[0, 0], K[1, 1], K[0, 0], K[1, 1]])
         # Normalize keypoints using camera intrinsics
         normalized_mkpts_0 = normalize_mkpts(mkpts_0, K)
@@ -74,8 +73,9 @@ class RefinedLocalVisualServoer(LightGlueVisualServoer):
 
         # Compute homography using normalized keypoints to improve robustness
         H_norm, inlier_mask = cv2.findHomography(normalized_mkpts_0, normalized_mkpts_1, cv2.USAC_MAGSAC, ransac_thr, confidence=0.99999)
-        
-        selected_R, selected_t = self.decompose_homography(H_norm)
+        H = K @ H_norm @ np.linalg.inv(K)
+
+        solution_index, selected_R, selected_t = self.decompose_homography(H_norm)
         delta_R = R.from_matrix(selected_R).as_euler('xyz')
 
         # Extract inlier points
@@ -168,9 +168,12 @@ class RefinedLocalVisualServoer(LightGlueVisualServoer):
             if self.use_homography is None:
                 self.use_homography = model_selection_homography(mkpts_scores_0[:, :2] , mkpts_scores_1[:, :2], K)
 
-            # if not self.use_homography:
-            delta_t, delta_r, error = self.get_task_function_3d(mkpts_scores_0, mkpts_scores_1, depth_cur, K)
-            print(f"Step {iteration + 1}, Error is : {error:.4g}")
+            if not self.use_homography:
+                delta_t, delta_r, error = self.get_task_function_3d(mkpts_scores_0, mkpts_scores_1, depth_cur, K)
+                print(f"Step {iteration + 1}, Error is : {error:.4g}")
+            else:
+                delta_t, delta_r, error = self.get_task_function_homography(mkpts_scores_0, mkpts_scores_1, depth_cur, K)
+
             # Compute transformation
             # T_delta_cam, _ = solve_transform_3d(mkpts_scores_0[:, :2] , mkpts_scores_1[:, :2] , self.depth_ref, depth_cur, K, compute_homography=False)
             
